@@ -289,12 +289,12 @@ if(ENGINE_SIM_BUILD_DESKTOP)
 endif()
 
 if(TARGET engine-sim-desktop)
-    set(CPACK_PACKAGE_NAME "engine-sim")
+    set(CPACK_PACKAGE_NAME "open-engine-simulator")
     set(CPACK_PACKAGE_VENDOR "Open Engine Simulator contributors")
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
         "Portable SDL desktop fork of AngeTheGreat's Engine Simulator")
     set(CPACK_PACKAGE_FILE_NAME
-        "engine-sim-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+        "open-engine-simulator-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
     set(CPACK_MONOLITHIC_INSTALL ON)
     set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
     if(WIN32 OR APPLE)
