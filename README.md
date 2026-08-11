@@ -1,6 +1,6 @@
 # Open Engine Simulator
 
-![Open Engine Simulator dashboard](docs/public/screenshots/screenshot_v01.png?raw=true)
+https://github.com/user-attachments/assets/5894bb7e-eee5-42f8-ab42-29088f6f7b51
 
 Open Engine Simulator is a community-driven fork of
 [AngeTheGreat's Engine Simulator](https://github.com/ange-yaghi/engine-sim):
