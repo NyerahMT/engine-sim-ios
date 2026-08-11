@@ -1,54 +1,62 @@
 #ifndef ATG_ENGINE_SIM_SHADERS_H
 #define ATG_ENGINE_SIM_SHADERS_H
 
-#include "delta.h"
-
+#include "render_math.h"
 #include "ui_math.h"
 
-class Shaders : public dbasic::ShaderBase {
-    public:
-        Shaders();
-        ~Shaders();
+#include <cstdint>
 
-        ysError Initialize(
-                dbasic::ShaderSet *shaderSet,
-                ysRenderTarget *mainRenderTarget,
-                ysRenderTarget *uiRenderTarget,
-                ysShaderProgram *shaderProgram,
-                ysInputLayout *inputLayout);
-        virtual ysError UseMaterial(dbasic::Material *material);
-		virtual void SetObjectTransform(const ysMatrix &mat);
-		virtual void ConfigureModel(float scale, dbasic::ModelAsset *model);
+// GPU-API-free renderer state consumed by the SDL GPU backend at submission.
+class Shaders {
+public:
+    using StageEnableFlags = std::uint32_t;
+    static constexpr StageEnableFlags SceneStage = 1u << 0;
+    static constexpr StageEnableFlags UiStage = 1u << 1;
 
-        void SetBaseColor(const ysVector &color);
-        void ResetBaseColor();
+    struct ScreenVariables {
+        ysMatrix Projection = ysMath::LoadIdentity();
+        ysMatrix CameraView = ysMath::LoadIdentity();
+        ysVector Eye = {};
+        float FogNear = 16000.0f;
+        float FogFar = 16001.0f;
+    };
 
-        dbasic::StageEnableFlags GetRegularFlags() const;
-        dbasic::StageEnableFlags GetUiFlags() const;
+    struct ObjectVariables {
+        ysMatrix Transform = ysMath::LoadIdentity();
+        ysVector BaseColor = ysMath::Constants::One;
+        int ColorReplace = 1;
+        int Lit = 0;
+    };
 
-        void CalculateCamera(
-            float width,
-            float height,
-            const Bounds &cameraBounds,
-            float screenWidth,
-            float screenHeight,
-            float angle = 0.0f);
-        void CalculateUiCamera(float screenWidth, float screenHeight);
+    Shaders();
+    ~Shaders();
 
-        void SetClearColor(const ysVector &col);
+    void SetObjectTransform(const ysMatrix &matrix);
+    void SetBaseColor(const ysVector &color);
+    void ResetBaseColor();
 
-    public:
-        dbasic::ShaderScreenVariables m_screenVariables;
-        dbasic::ShaderScreenVariables m_uiScreenVariables;
-        dbasic::ShaderObjectVariables m_objectVariables;
+    StageEnableFlags GetRegularFlags() const;
+    StageEnableFlags GetUiFlags() const;
 
-        ysVector m_cameraPosition;
+    void CalculateCamera(
+        float width,
+        float height,
+        const Bounds &cameraBounds,
+        float screenWidth,
+        float screenHeight,
+        float angle = 0.0f);
+    void CalculateUiCamera(float screenWidth, float screenHeight);
 
-    protected:
-        dbasic::ShaderStage *m_mainStage;
-        dbasic::ShaderStage *m_uiStage;
+    void SetClearColor(const ysVector &color);
+    const ysVector &GetClearColor() const;
 
-        dbasic::LightingControls m_lightingControls;
+    ScreenVariables m_screenVariables;
+    ScreenVariables m_uiScreenVariables;
+    ObjectVariables m_objectVariables;
+    ysVector m_cameraPosition;
+
+private:
+    ysVector m_clearColor;
 };
 
 #endif /* ATG_ENGINE_SIM_SHADERS_H */

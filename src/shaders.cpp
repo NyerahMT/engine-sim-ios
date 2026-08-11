@@ -1,183 +1,80 @@
 #include "../include/shaders.h"
 
-Shaders::Shaders() {
-    m_cameraPosition = ysMath::LoadVector(0.0f, 0.0f);
+#include <cmath>
 
-    m_mainStage = nullptr;
-    m_uiStage = nullptr;
+namespace {
 
-    m_objectVariables.ColorReplace = 1;
-    m_objectVariables.Lit = 0;
-    m_objectVariables.Transform = ysMath::LoadIdentity();
-
-    m_screenVariables.FogNear = m_uiScreenVariables.FogNear = 16000.0f;
-    m_screenVariables.FogFar = m_uiScreenVariables.FogFar = 16001.0f;
+ysMatrix orthographicProjection(float width, float height, float nearPlane, float farPlane) {
+    ysMatrix result = {};
+    result.m[0][0] = 2.0f / width;
+    result.m[1][1] = 2.0f / height;
+    result.m[2][2] = 1.0f / (nearPlane - farPlane);
+    result.m[2][3] = nearPlane / (nearPlane - farPlane);
+    result.m[3][3] = 1.0f;
+    return result;
 }
 
-Shaders::~Shaders() {
-    /* void */
+ysMatrix cameraTarget(const ysVector &eye, const ysVector &target, const ysVector &up) {
+    const ysVector forward = ysMath::Normalize(ysMath::Sub(target, eye));
+    const ysVector right = ysMath::Normalize(ysMath::Cross(forward, up));
+    const ysVector correctedUp = ysMath::Cross(right, forward);
+
+    ysMatrix result = ysMath::LoadIdentity();
+    result.m[0][0] = right.x;
+    result.m[0][1] = right.y;
+    result.m[0][2] = right.z;
+    result.m[0][3] = -ysMath::GetScalar(ysMath::Dot(right, eye));
+    result.m[1][0] = correctedUp.x;
+    result.m[1][1] = correctedUp.y;
+    result.m[1][2] = correctedUp.z;
+    result.m[1][3] = -ysMath::GetScalar(ysMath::Dot(correctedUp, eye));
+    result.m[2][0] = -forward.x;
+    result.m[2][1] = -forward.y;
+    result.m[2][2] = -forward.z;
+    result.m[2][3] = ysMath::GetScalar(ysMath::Dot(forward, eye));
+    return result;
 }
 
-ysError Shaders::Initialize(
-        dbasic::ShaderSet *shaderSet,
-        ysRenderTarget *mainRenderTarget,
-        ysRenderTarget *uiRenderTarget,
-        ysShaderProgram *shaderProgram,
-        ysInputLayout *inputLayout)
-{
-    YDS_ERROR_DECLARE("Initialize");
+} // namespace
 
-    YDS_NESTED_ERROR_CALL(shaderSet->NewStage("ShaderStage::Main", &m_mainStage));
-    YDS_NESTED_ERROR_CALL(shaderSet->NewStage("ShaderStage::UI", &m_uiStage));
+Shaders::Shaders()
+    : m_cameraPosition(ysMath::LoadVector(0.0f, 0.0f, 0.0f, 1.0f)),
+      m_clearColor(ysColor::srgbiToLinear(0x34, 0x98, 0xdb)) { }
 
-    m_mainStage->SetInputLayout(inputLayout);
-    m_mainStage->SetRenderTarget(mainRenderTarget);
-    m_mainStage->SetShaderProgram(shaderProgram);
-    m_mainStage->SetFlagBit(0);
-    m_mainStage->SetType(dbasic::ShaderStage::Type::FullPass);
+Shaders::~Shaders() = default;
 
-    m_mainStage->NewConstantBuffer<dbasic::ShaderScreenVariables>(
-        "Buffer::ScreenData",
-        0,
-        dbasic::ShaderStage::ConstantBufferBinding::BufferType::SceneData,
-        &m_screenVariables);
-    m_mainStage->NewConstantBuffer<dbasic::ShaderObjectVariables>(
-        "Buffer::ObjectData",
-        1,
-        dbasic::ShaderStage::ConstantBufferBinding::BufferType::ObjectData,
-        &m_objectVariables);
-    m_mainStage->NewConstantBuffer<dbasic::LightingControls>(
-        "Buffer::LightingData",
-        3,
-        dbasic::ShaderStage::ConstantBufferBinding::BufferType::SceneData,
-        &m_lightingControls);
-
-    // UI Stage
-    m_uiStage->SetInputLayout(inputLayout);
-    m_uiStage->SetRenderTarget(uiRenderTarget);
-    m_uiStage->SetShaderProgram(shaderProgram);
-    m_uiStage->SetFlagBit(1);
-    m_uiStage->SetClearTarget(false);
-    m_uiStage->SetType(dbasic::ShaderStage::Type::FullPass);
-
-    m_uiStage->NewConstantBuffer<dbasic::ShaderScreenVariables>(
-        "Buffer::ScreenData",
-        0,
-        dbasic::ShaderStage::ConstantBufferBinding::BufferType::SceneData,
-        &m_uiScreenVariables);
-    m_uiStage->NewConstantBuffer<dbasic::ShaderObjectVariables>(
-        "Buffer::ObjectData",
-        1,
-        dbasic::ShaderStage::ConstantBufferBinding::BufferType::ObjectData,
-        &m_objectVariables);
-    m_uiStage->NewConstantBuffer<dbasic::LightingControls>(
-        "Buffer::LightingData",
-        3,
-        dbasic::ShaderStage::ConstantBufferBinding::BufferType::SceneData,
-        &m_lightingControls);
-
-    return YDS_ERROR_RETURN(ysError::None);
-}
-
-ysError Shaders::UseMaterial(dbasic::Material *material) {
-    YDS_ERROR_DECLARE("UseMaterial");
-    return YDS_ERROR_RETURN(ysError::None);
-}
-
-void Shaders::SetObjectTransform(const ysMatrix &mat) {
-    m_objectVariables.Transform = mat;
-}
-
-void Shaders::ConfigureModel(float scale, dbasic::ModelAsset *model) {
-    /* void */
-}
-
-void Shaders::SetBaseColor(const ysVector &color) {
-    m_objectVariables.BaseColor = color;
-}
-
-void Shaders::ResetBaseColor() {
-    m_objectVariables.BaseColor = ysMath::LoadVector(1.0f, 1.0f, 1.0f, 1.0f);
-}
-
-dbasic::StageEnableFlags Shaders::GetRegularFlags() const {
-    return m_mainStage->GetFlags();
-}
-
-dbasic::StageEnableFlags Shaders::GetUiFlags() const {
-    return m_uiStage->GetFlags();
-}
+void Shaders::SetObjectTransform(const ysMatrix &matrix) { m_objectVariables.Transform = matrix; }
+void Shaders::SetBaseColor(const ysVector &color) { m_objectVariables.BaseColor = color; }
+void Shaders::ResetBaseColor() { m_objectVariables.BaseColor = ysMath::Constants::One; }
+Shaders::StageEnableFlags Shaders::GetRegularFlags() const { return SceneStage; }
+Shaders::StageEnableFlags Shaders::GetUiFlags() const { return UiStage; }
 
 void Shaders::CalculateCamera(
     float width,
     float height,
-    const Bounds &cameraBounds,
-    float screenWidth,
-    float screenHeight,
+    const Bounds &,
+    float,
+    float,
     float angle)
 {
-    const ysMatrix projection = ysMath::OrthographicProjection(
-        width,
-        height,
-        0.001f,
-        500.0f);
-    const Point scale = Point(screenWidth, screenHeight);
-    const Point center =
-        (cameraBounds.getPosition() - Point(screenWidth / 2, screenHeight / 2))
-        / scale;
-
     m_screenVariables.Projection = ysMath::Transpose(
-        ysMath::MatMult(
-            projection,
-            ysMath::MatMult(
-                ysMath::ScaleTransform(ysMath::LoadVector(
-                    cameraBounds.width() / screenWidth,
-                    cameraBounds.height() / screenHeight,
-                    1.0f)),
-                ysMath::TranslationTransform(ysMath::LoadVector(center.x, center.y, 0.0f))
-            )
-        )
-    );
-
-    m_screenVariables.Projection = ysMath::Transpose(projection);
-
-    const float sinAngle = std::sin(angle);
-    const float cosAngle = std::cos(angle);
-
-    const ysVector cameraEye =
-        ysMath::Add(
-                ysMath::LoadVector(10.0f * sinAngle, 0.0f, 10.0f * cosAngle, 1.0f),
-                m_cameraPosition);
-    const ysVector cameraTarget =
-        ysMath::Add(
-                ysMath::LoadVector(0.0f, 0.0f, 0.0f, 1.0f),
-                m_cameraPosition);
-    const ysVector up = ysMath::LoadVector(0.0f, 1.0f);
-
-    m_screenVariables.CameraView =
-        ysMath::Transpose(ysMath::CameraTarget(cameraEye, cameraTarget, up));
-    m_screenVariables.Eye = ysMath::LoadVector(cameraEye);
+        orthographicProjection(width, height, 0.001f, 500.0f));
+    const ysVector eye = ysMath::Add(
+        ysMath::LoadVector(10.0f * std::sin(angle), 0.0f, 10.0f * std::cos(angle), 1.0f),
+        m_cameraPosition);
+    m_screenVariables.CameraView = ysMath::Transpose(cameraTarget(
+        eye, m_cameraPosition, ysMath::Constants::YAxis));
+    m_screenVariables.Eye = eye;
 }
 
 void Shaders::CalculateUiCamera(float screenWidth, float screenHeight) {
     m_uiScreenVariables.Projection = ysMath::Transpose(
-        ysMath::OrthographicProjection(
-            screenWidth,
-            screenHeight,
-            0.001f,
-            500.0f));
-
-    const ysVector cameraEye =
-        ysMath::LoadVector(0.0f, 0.0f, 10.0f, 1.0f);
-    const ysVector cameraTarget =
-        ysMath::LoadVector(0.0f, 0.0f, 0.0f, 1.0f);
-    const ysVector up = ysMath::LoadVector(0.0f, 1.0f);
-
-    m_uiScreenVariables.CameraView =
-        ysMath::Transpose(ysMath::CameraTarget(cameraEye, cameraTarget, up));
-    m_uiScreenVariables.Eye = ysMath::LoadVector(cameraEye);
+        orthographicProjection(screenWidth, screenHeight, 0.001f, 500.0f));
+    const ysVector eye = ysMath::LoadVector(0.0f, 0.0f, 10.0f, 1.0f);
+    m_uiScreenVariables.CameraView = ysMath::Transpose(cameraTarget(
+        eye, ysMath::LoadVector(0.0f, 0.0f, 0.0f, 1.0f), ysMath::Constants::YAxis));
+    m_uiScreenVariables.Eye = eye;
 }
 
-void Shaders::SetClearColor(const ysVector &col) {
-    m_mainStage->SetClearColor(col);
-}
+void Shaders::SetClearColor(const ysVector &color) { m_clearColor = color; }
+const ysVector &Shaders::GetClearColor() const { return m_clearColor; }

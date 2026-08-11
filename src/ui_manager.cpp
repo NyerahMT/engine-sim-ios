@@ -1,20 +1,19 @@
 #include "../include/ui_manager.h"
 
-#include "../include/engine_sim_application.h"
-
 UiManager::UiManager() {
     m_app = nullptr;
+    m_platform = nullptr;
     m_dragStart = nullptr;
     m_hover = nullptr;
-    m_lastMouseScroll = 0;
 }
 
 UiManager::~UiManager() {
     /* void */
 }
 
-void UiManager::initialize(EngineSimApplication *app) {
+void UiManager::initialize(EngineSimApplication *app, DesktopPlatform *platform) {
     m_app = app;
+    m_platform = platform;
     m_root.initialize(app);
 }
 
@@ -22,6 +21,7 @@ void UiManager::destroy() {
     m_root.destroy();
     m_hover = nullptr;
     m_dragStart = nullptr;
+    m_platform = nullptr;
     m_app = nullptr;
 }
 
@@ -29,7 +29,7 @@ void UiManager::update(float dt) {
     m_root.update(dt);
 
     int mouse_x, mouse_y;
-    m_app->getEngine()->GetOsMousePos(&mouse_x, &mouse_y);
+    m_platform->mousePosition(&mouse_x, &mouse_y);
 
     Point mousePos = { (float)mouse_x, (float)mouse_y };
     UiElement *newHover = m_root.mouseOver(mousePos);
@@ -39,7 +39,7 @@ void UiManager::update(float dt) {
         m_hover = newHover;
     }
 
-    if (m_app->getEngine()->ProcessMouseButtonDown(ysMouse::Button::Left)) {
+    if (m_platform->wasMouseButtonPressed(DesktopMouseButton::Left)) {
         m_dragStart = m_hover;
         m_mouse_p0 = mousePos;
         if (m_dragStart != nullptr) {
@@ -47,7 +47,7 @@ void UiManager::update(float dt) {
             m_dragStart->onMouseDown(m_dragStart->worldToLocal(mousePos));
         }
     }
-    else if (m_app->getEngine()->ProcessMouseButtonUp(ysMouse::Button::Left)) {
+    else if (m_platform->wasMouseButtonReleased(DesktopMouseButton::Left)) {
         UiElement *dragRelease = m_hover;
 
         if (m_dragStart != nullptr) m_dragStart->onMouseUp(mousePos);
@@ -59,13 +59,11 @@ void UiManager::update(float dt) {
         m_dragStart = nullptr;
     }
 
-    const int newMouseScroll = m_app->getEngine()->GetMouseWheel();
-    if (m_lastMouseScroll != newMouseScroll) {
+    const int mouseScroll = static_cast<int>(m_platform->mouseWheelY());
+    if (mouseScroll != 0) {
         if (m_hover != nullptr) {
-            m_hover->onMouseScroll(newMouseScroll - m_lastMouseScroll);
+            m_hover->onMouseScroll(mouseScroll);
         }
-
-        m_lastMouseScroll = newMouseScroll;
     }
 
     if (m_dragStart != nullptr) {

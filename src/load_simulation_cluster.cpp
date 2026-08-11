@@ -130,7 +130,7 @@ void LoadSimulationCluster::update(float dt) {
         m_systemStatusLights[i] = (1 - alpha) * m_systemStatusLights[i] + alpha * next;
     }
 
-    if (m_app->getEngine()->ProcessKeyDown(ysKey::Code::I)) {
+    if (m_app->getPlatform()->wasKeyPressed(DesktopKey::I)) {
         std::stringstream ss;
         ss << std::setprecision(0) << std::fixed;
         if (m_powerUnits == "hp") {

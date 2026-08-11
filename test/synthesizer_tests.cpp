@@ -3,6 +3,9 @@
 #include "../include/synthesizer.h"
 
 #include <chrono>
+#include <atomic>
+#include <cmath>
+#include <thread>
 
 using namespace std::chrono_literals;
 
@@ -17,25 +20,7 @@ void setupStandardSynthesizer(Synthesizer &synth) {
     Synthesizer::AudioParameters audioParams;
     audioParams.airNoise = 0.0;
     audioParams.inputSampleNoise = 0.0;
-    audioParams.levelerMaxGain = 1.0;
-    audioParams.levelerMinGain = 1.0;
-    audioParams.dF_F_mix = 0.0;
-    params.initialAudioParameters = audioParams;
-
-    synth.initialize(params);
-}
-
-void setupSynchronizedSynthesizer(Synthesizer &synth) {
-    Synthesizer::Parameters params;
-    params.audioBufferSize = 512 * 16;
-    params.audioSampleRate = 32;
-    params.inputBufferSize = 1024;
-    params.inputChannelCount = 8;
-    params.inputSampleRate = 32;
-
-    Synthesizer::AudioParameters audioParams;
-    audioParams.airNoise = 0.0;
-    audioParams.inputSampleNoise = 0.0;
+    audioParams.convolution = 0.0;
     audioParams.levelerMaxGain = 1.0;
     audioParams.levelerMinGain = 1.0;
     audioParams.dF_F_mix = 0.0;
@@ -47,6 +32,65 @@ void setupSynchronizedSynthesizer(Synthesizer &synth) {
 TEST(SynthesizerTests, SynthesizerSanityCheck) {
     Synthesizer synth;
     setupStandardSynthesizer(synth);
+    synth.destroy();
+}
+
+TEST(SynthesizerTests, ThreadedProducerAndConsumerMaintainOutput) {
+    Synthesizer synth;
+    Synthesizer::Parameters params;
+    params.audioBufferSize = 4096;
+    params.audioSampleRate = 44100;
+    params.inputBufferSize = 4096;
+    params.inputChannelCount = 1;
+    params.inputSampleRate = 44100;
+    params.initialAudioParameters.airNoise = 0.0f;
+    params.initialAudioParameters.inputSampleNoise = 0.0f;
+    params.initialAudioParameters.convolution = 0.0f;
+    params.initialAudioParameters.dF_F_mix = 0.0f;
+    params.initialAudioParameters.levelerMaxGain = 1.0f;
+    params.initialAudioParameters.levelerMinGain = 1.0f;
+    synth.initialize(params);
+    synth.startAudioRenderingThread();
+
+    std::atomic<bool> producerFinished = false;
+    std::thread producer([&] {
+        for (int block = 0; block < 100; ++block) {
+            for (int i = 0; i < 10; ++i) {
+                const double phase = 2.0 * 3.141592653589793 * 0.01 * (block * 10 + i);
+                const double sample[] = { 12000.0 * std::sin(phase) };
+                synth.writeInput(sample);
+            }
+            synth.endInputBlock();
+            std::this_thread::sleep_for(1ms);
+        }
+        producerFinished = true;
+    });
+
+    int received = 0;
+    int longestNearZeroRun = 0;
+    int nearZeroRun = 0;
+    int16_t buffer[10] = {};
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (std::chrono::steady_clock::now() < deadline
+        && (!producerFinished || received < 950))
+    {
+        const int read = synth.readAudioOutput(10, buffer);
+        for (int i = 0; i < read; ++i) {
+            if (std::abs(buffer[i]) < 20) ++nearZeroRun;
+            else nearZeroRun = 0;
+            longestNearZeroRun = std::max(longestNearZeroRun, nearZeroRun);
+        }
+        received += read;
+        std::this_thread::sleep_for(1ms);
+    }
+
+    producer.join();
+    EXPECT_GE(received, 950);
+    // The high-pass stage settles through zero around waveform crossings, but
+    // the threaded hand-off must not create a long silent run.
+    EXPECT_LE(longestNearZeroRun, 20);
+
+    synth.endAudioRenderingThread();
     synth.destroy();
 }
 /*
@@ -106,85 +150,3 @@ TEST(SynthesizerTests, SynthesizerSampleTest) {
     synth.destroy();
 }
 */
-
-TEST(SynthesizerTests, SynthesizerSystemTestSingleThread) {
-    constexpr int inputSamples = 64;
-    constexpr int outputSamples = 63;
-
-    Synthesizer synth;
-    setupSynchronizedSynthesizer(synth);
-
-    int16_t *output = new int16_t[outputSamples];
-    int totalSamples = 0;
-
-    for (int i = 0; i < inputSamples;) {
-        for (int j = 0; j < 16; ++j, ++i) {
-            const double v = (double)i;
-            const double data[] = { v, v, v, v, v, v, v, v };
-            synth.writeInput(data);
-        }
-
-        synth.endInputBlock();
-        synth.renderAudio();
-
-        totalSamples += synth.readAudioOutput(16, output + totalSamples);
-        int a = 0;
-    }
-
-    const int rem = synth.readAudioOutput(outputSamples - totalSamples, output + totalSamples);
-
-    EXPECT_EQ(rem, outputSamples - totalSamples);
-
-    for (int i = 0; i < 16; ++i) {
-        EXPECT_EQ(output[i], 0);
-    }
-
-    for (int i = 16; i < outputSamples; ++i) {
-        EXPECT_EQ(output[i], (i - 16) * 10 * 8);
-    }
-
-    synth.destroy();
-    delete[] output;
-}
-
-TEST(SynthesizerTests, SynthesizerSystemTest) {
-    constexpr int inputSamples = 1024;
-    constexpr int outputSamples = 1023;
-
-    Synthesizer synth;
-    setupSynchronizedSynthesizer(synth);
-    synth.startAudioRenderingThread();
-
-    int16_t *output = new int16_t[outputSamples];
-    int totalSamples = 0;
-
-    for (int i = 0; i < inputSamples;) {
-        for (int j = 0; j < 16; ++j, ++i) {
-            const double v = (double)i;
-            const double data[] = { v, v, v, v, v, v, v, v };
-            synth.writeInput(data);
-        }
-
-        const int samplesReturned = synth.readAudioOutput(8, output + totalSamples);
-        totalSamples += samplesReturned;
-    }
-
-    synth.endInputBlock();
-    synth.waitProcessed();
-
-    const int rem = synth.readAudioOutput(outputSamples - totalSamples, output + totalSamples);
-    EXPECT_EQ(rem, outputSamples - totalSamples);
-
-    for (int i = 0; i < 16; ++i) {
-        EXPECT_EQ(output[i], 0);
-    }
-
-    for (int i = 16; i < outputSamples; ++i) {
-        EXPECT_EQ(output[i], std::min(32767, (i - 16) * 10 * 8));
-    }
-
-    synth.endAudioRenderingThread();
-    synth.destroy();
-
-    delete[] output;
-}

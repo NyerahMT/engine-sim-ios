@@ -79,14 +79,20 @@ class Synthesizer {
         void renderAudio();
 
         double getLatency() const;
+        double getAudioOutputLatency() const {
+            return static_cast<double>(m_audioBufferedSamples.load()) / m_audioSampleRate;
+        }
 
         int inputDelta(int s1, int s0) const;
         double inputDistance(double s1, double s0) const;
 
         void setInputSampleRate(double sampleRate);
         double getInputSampleRate() const { return m_inputSampleRate; }
+        // A real-time host may discard stale samples rather than let source
+        // latency grow indefinitely. A negative value leaves it unbounded.
+        void setMaximumInputLatency(double seconds) { m_maximumInputLatency = seconds; }
 
-        int16_t renderAudio(int inputOffset);
+        int16_t renderAudio(int inputOffset, const AudioParameters &parameters);
 
         double getLevelerGain();
         AudioParameters getAudioParameters();
@@ -109,13 +115,20 @@ class Synthesizer {
 
         float m_inputSampleRate;
         float m_audioSampleRate;
+        double m_maximumInputLatency;
 
         std::thread *m_thread;
         std::atomic<bool> m_run;
+        std::atomic<int> m_audioBufferedSamples;
         bool m_processed;
 
-        std::mutex m_inputLock;
-        std::mutex m_lock0;
+        // Input is produced on the simulation thread, rendered on a worker,
+        // then consumed by the platform audio output. Keep each hand-off
+        // independent so convolution work never blocks the device reader.
+        mutable std::mutex m_inputLock;
+        mutable std::mutex m_lock0;
+        mutable std::mutex m_parameterLock;
+        mutable std::mutex m_renderLock;
         std::condition_variable m_cv0;
 
         ProcessingFilters *m_filters;

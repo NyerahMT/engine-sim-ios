@@ -6,6 +6,7 @@
 #include "engine_sim.h"
 #include "piranha.h"
 
+#include <string>
 #include <vector>
 
 namespace es_script {
@@ -31,7 +32,7 @@ namespace es_script {
 
         static Output *output();
 
-        void initialize();
+        void initialize(const std::string &assetDirectory);
         bool compile(const piranha::IrPath &path);
         Output execute();
         void destroy();

@@ -2,7 +2,7 @@
 #define ATG_ENGINE_SIM_SIMULATION_OBJECT_H
 
 #include "scs.h"
-#include "delta.h"
+#include "render_math.h"
 
 class Piston;
 class CylinderBank;

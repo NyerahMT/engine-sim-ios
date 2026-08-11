@@ -1,0 +1,18 @@
+#include <metal_stdlib>
+
+using namespace metal;
+
+struct FragmentUniforms {
+    float4 baseColor;
+};
+
+struct FragmentOut {
+    float4 color [[color(0)]];
+};
+
+fragment FragmentOut PSMain(constant FragmentUniforms &uniforms [[buffer(0)]])
+{
+    FragmentOut output = {};
+    output.color = uniforms.baseColor;
+    return output;
+}

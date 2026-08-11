@@ -1,13 +1,10 @@
 #include "../include/synthesizer.h"
 
 #include "../include/utilities.h"
-#include "../include/delta.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
-
-#undef min
-#undef max
 
 Synthesizer::Synthesizer() {
     m_inputChannels = nullptr;
@@ -20,10 +17,12 @@ Synthesizer::Synthesizer() {
 
     m_inputSampleRate = 0.0;
     m_audioSampleRate = 0.0;
+    m_maximumInputLatency = -1.0;
 
     m_lastInputSampleOffset = 0.0;
 
     m_run = true;
+    m_audioBufferedSamples = 0;
     m_thread = nullptr;
     m_filters = nullptr;
 }
@@ -47,6 +46,7 @@ void Synthesizer::initialize(const Parameters &p) {
 
     m_inputWriteOffset = 0;
     m_processed = true;
+    m_audioBufferedSamples = 0;
 
     m_audioBuffer.initialize(p.audioBufferSize);
     m_inputChannels = new InputChannel[p.inputChannelCount];
@@ -139,33 +139,41 @@ void Synthesizer::destroy() {
 }
 
 int Synthesizer::readAudioOutput(int samples, int16_t *buffer) {
-    std::lock_guard<std::mutex> lock(m_lock0);
+    int samplesConsumed = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_lock0);
 
-    const int newDataLength = m_audioBuffer.size();
-    if (newDataLength >= samples) {
-        m_audioBuffer.readAndRemove(samples, buffer);
-    }
-    else {
-        m_audioBuffer.readAndRemove(newDataLength, buffer);
-        memset(
-            buffer + newDataLength,
-            0,
-            sizeof(int16_t) * ((size_t)samples - newDataLength));
-    }
-    
-    const int samplesConsumed = std::min(samples, newDataLength);
+        const int newDataLength = m_audioBuffer.size();
+        if (newDataLength >= samples) {
+            m_audioBuffer.readAndRemove(samples, buffer);
+        }
+        else {
+            m_audioBuffer.readAndRemove(newDataLength, buffer);
+            memset(
+                buffer + newDataLength,
+                0,
+                sizeof(int16_t) * ((size_t)samples - newDataLength));
+        }
 
+        samplesConsumed = std::min(samples, newDataLength);
+        m_audioBufferedSamples = static_cast<int>(m_audioBuffer.size());
+    }
+
+    // The renderer waits while its small output reservoir is full. A consumer
+    // draining it is the event that makes additional rendering possible.
+    if (samplesConsumed > 0) m_cv0.notify_one();
     return samplesConsumed;
 }
 
 void Synthesizer::waitProcessed() {
     {
-        std::unique_lock<std::mutex> lk(m_lock0);
+        std::unique_lock<std::mutex> lk(m_inputLock);
         m_cv0.wait(lk, [this] { return m_processed; });
     }
 }
 
 void Synthesizer::writeInput(const double *data) {
+    std::lock_guard<std::mutex> lock(m_inputLock);
     m_inputWriteOffset += (double)m_audioSampleRate / m_inputSampleRate;
     if (m_inputWriteOffset >= (double)m_inputBufferSize) {
         m_inputWriteOffset -= (double)m_inputBufferSize;
@@ -195,15 +203,20 @@ void Synthesizer::writeInput(const double *data) {
 }
 
 void Synthesizer::endInputBlock() {
-    std::unique_lock<std::mutex> lk(m_inputLock); 
+    std::unique_lock<std::mutex> lk(m_inputLock);
 
     for (int i = 0; i < m_inputChannelCount; ++i) {
-        m_inputChannels[i].data.removeBeginning(m_inputSamplesRead);
+        RingBuffer<float> &buffer = m_inputChannels[i].data;
+        buffer.removeBeginning(m_inputSamplesRead);
+        if (m_maximumInputLatency >= 0.0) {
+            const int maximumSamples = static_cast<int>(
+                std::round(m_maximumInputLatency * m_audioSampleRate));
+            const int staleSamples = static_cast<int>(buffer.size()) - maximumSamples;
+            if (staleSamples > 0) buffer.removeBeginning(staleSamples);
+        }
     }
 
-    if (m_inputChannelCount != 0) {
-        m_latency = m_inputChannels[0].data.size();
-    }
+    if (m_inputChannelCount != 0) m_latency = m_inputChannels[0].data.size();
     
     m_inputSamplesRead = 0;
     m_processed = false;
@@ -218,19 +231,22 @@ void Synthesizer::audioRenderingThread() {
     }
 }
 
-#undef max
 void Synthesizer::renderAudio() {
-    std::unique_lock<std::mutex> lk0(m_lock0);
+    std::unique_lock<std::mutex> inputLock(m_inputLock);
+    // A second, modest reservoir decouples the render worker from the device
+    // queue without adding a perceptible control-to-sound delay.
+    constexpr int outputLeadSamples = 1024;
+    const int targetOutputSamples = std::min(outputLeadSamples, m_audioBufferSize - 1);
 
-    m_cv0.wait(lk0, [this] {
+    m_cv0.wait(inputLock, [this, outputLeadSamples] {
         const bool inputAvailable =
             m_inputChannels[0].data.size() > 0
-            && m_audioBuffer.size() < 2000;
+            && m_audioBufferedSamples.load() < std::min(outputLeadSamples, m_audioBufferSize - 1);
         return !m_run || (inputAvailable && !m_processed);
     });
 
     const int n = std::min(
-        std::max(0, 2000 - (int)m_audioBuffer.size()),
+        std::max(0, targetOutputSamples - m_audioBufferedSamples.load()),
         (int)m_inputChannels[0].data.size());
 
     for (int i = 0; i < m_inputChannelCount; ++i) {
@@ -240,22 +256,33 @@ void Synthesizer::renderAudio() {
     m_inputSamplesRead = n;
     m_processed = true;
 
-    lk0.unlock();
+    inputLock.unlock();
 
+    AudioParameters parameters;
+    {
+        std::lock_guard<std::mutex> lock(m_parameterLock);
+        parameters = m_audioParameters;
+    }
+    std::lock_guard<std::mutex> renderLock(m_renderLock);
     for (int i = 0; i < m_inputChannelCount; ++i) {
         m_filters[i].airNoiseLowPass.setCutoffFrequency(
-            static_cast<float>(m_audioParameters.airNoiseFrequencyCutoff), m_audioSampleRate);
-        m_filters[i].jitterFilter.setJitterScale(m_audioParameters.inputSampleNoise);
+            static_cast<float>(parameters.airNoiseFrequencyCutoff), m_audioSampleRate);
+        m_filters[i].jitterFilter.setJitterScale(parameters.inputSampleNoise);
     }
 
-    for (int i = 0; i < n; ++i) {
-        m_audioBuffer.write(renderAudio(i));
+    {
+        std::lock_guard<std::mutex> outputLock(m_lock0);
+        for (int i = 0; i < n; ++i) {
+            m_audioBuffer.write(renderAudio(i, parameters));
+        }
+        m_audioBufferedSamples = static_cast<int>(m_audioBuffer.size());
     }
 
     m_cv0.notify_one();
 }
 
 double Synthesizer::getLatency() const {
+    std::lock_guard<std::mutex> lock(m_inputLock);
     return (double)m_latency / m_audioSampleRate;
 }
 
@@ -273,15 +300,15 @@ double Synthesizer::inputDistance(double s1, double s0) const {
 
 void Synthesizer::setInputSampleRate(double sampleRate) {
     if (sampleRate != m_inputSampleRate) {
-        std::lock_guard<std::mutex> lock(m_lock0);
+        std::lock_guard<std::mutex> lock(m_inputLock);
         m_inputSampleRate = sampleRate;
     }
 }
 
-int16_t Synthesizer::renderAudio(int inputSample) {
-    const float airNoise = m_audioParameters.airNoise;
-    const float dF_F_mix = m_audioParameters.dF_F_mix;
-    const float convAmount = m_audioParameters.convolution;
+int16_t Synthesizer::renderAudio(int inputSample, const AudioParameters &parameters) {
+    const float airNoise = parameters.airNoise;
+    const float dF_F_mix = parameters.dF_F_mix;
+    const float convAmount = parameters.convolution;
 
     float signal = 0;
     for (int i = 0; i < m_inputChannelCount; ++i) {
@@ -308,17 +335,20 @@ int16_t Synthesizer::renderAudio(int inputSample) {
             v_in = 0;
         }
 
-        const float v =
-            convAmount * m_filters[i].convolution.f(v_in)
-            + (1 - convAmount) * v_in;
+        // Some callers intentionally run dry (and tests may do so before an
+        // impulse response is installed). Avoid touching an uninitialized
+        // convolution state in that case.
+        const float v = (convAmount > 0.0f && m_filters[i].convolution.getSampleCount() > 0)
+            ? convAmount * m_filters[i].convolution.f(v_in) + (1 - convAmount) * v_in
+            : v_in;
 
         signal += v;
     }
 
     signal = m_antialiasing.fast_f(signal);
 
-    m_levelingFilter.p_target = m_audioParameters.levelerTarget;
-    const float v_leveled = m_levelingFilter.f(signal) * m_audioParameters.volume;
+    m_levelingFilter.p_target = parameters.levelerTarget;
+    const float v_leveled = m_levelingFilter.f(signal) * parameters.volume;
     int r_int = std::lround(v_leveled);
     if (r_int > INT16_MAX) {
         r_int = INT16_MAX;
@@ -331,16 +361,16 @@ int16_t Synthesizer::renderAudio(int inputSample) {
 }
 
 double Synthesizer::getLevelerGain() {
-    std::lock_guard<std::mutex> lock(m_lock0);
+    std::lock_guard<std::mutex> lock(m_renderLock);
     return m_levelingFilter.getAttenuation();
 }
 
 Synthesizer::AudioParameters Synthesizer::getAudioParameters() {
-    std::lock_guard<std::mutex> lock(m_lock0);
+    std::lock_guard<std::mutex> lock(m_parameterLock);
     return m_audioParameters;
 }
 
 void Synthesizer::setAudioParameters(const AudioParameters &params) {
-    std::lock_guard<std::mutex> lock(m_lock0);
+    std::lock_guard<std::mutex> lock(m_parameterLock);
     m_audioParameters = params;
 }

@@ -2,6 +2,7 @@
 #define ATG_ENGINE_SIM_UI_MANAGER_H
 
 #include "ui_element.h"
+#include "desktop_platform.h"
 
 #include <vector>
 
@@ -11,7 +12,7 @@ class UiManager {
         UiManager();
         ~UiManager();
 
-        void initialize(EngineSimApplication *app);
+        void initialize(EngineSimApplication *app, DesktopPlatform *platform);
         void destroy();
 
         void update(float dt);
@@ -27,10 +28,9 @@ class UiManager {
         Point m_mouse_p0;
         Point m_drag_p0;
 
-        int m_lastMouseScroll;
-
     protected:
         EngineSimApplication *m_app;
+        DesktopPlatform *m_platform;
 };
 
 #endif /* ATG_ENGINE_SIM_UI_MANAGER_H */

@@ -1,7 +1,7 @@
 #ifndef ATG_ENGINE_SIM_GEOMETRY_GENERATOR_H
 #define ATG_ENGINE_SIM_GEOMETRY_GENERATOR_H
 
-#include "delta.h"
+#include "render_math.h"
 
 #include "../include/function.h"
 
@@ -14,7 +14,7 @@ public:
         int BaseVertex = -1;
         int FaceCount = -1;
 
-        dbasic::Vertex *VertexData = nullptr;
+        EngineSimVertex *VertexData = nullptr;
     };
 
     struct LineRingParameters {
@@ -122,7 +122,7 @@ public:
     void initialize(int vertexBufferSize, int indexBufferSize);
     void destroy();
 
-    const dbasic::Vertex *getVertexData() const { return m_vertexData; }
+    const EngineSimVertex *getVertexData() const { return m_vertexData; }
     const unsigned short *getIndexData() const { return m_indexData; }
 
     int getCurrentVertexCount() const { return m_state.vertexPointer; }
@@ -182,6 +182,12 @@ public:
     bool generateIsoscelesTriangle(
         float x, float y, float width, float height);
 
+    bool generateRawMesh(
+        const EngineSimVertex *vertices,
+        int vertexCount,
+        const unsigned short *indices,
+        int indexCount);
+
     bool startPath(PathParameters &params);
     bool generatePathSegment(PathParameters &params, bool detached = false);
 
@@ -191,7 +197,7 @@ public:
 protected:
     void startSubshape();
 
-    dbasic::Vertex *writeVertex();
+    EngineSimVertex *writeVertex();
     void writeFace(unsigned short i0, unsigned short i1, unsigned short i2);
 
     bool checkCapacity(int vertexCount, int indexCount);
@@ -200,7 +206,7 @@ protected:
     static ysVector findOrthogonal(const ysVector &v);
 
 protected:
-    dbasic::Vertex *m_vertexData;
+    EngineSimVertex *m_vertexData;
     unsigned short *m_indexData;
 
     int m_vertexBufferSize;

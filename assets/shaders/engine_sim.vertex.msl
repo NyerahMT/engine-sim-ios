@@ -1,0 +1,28 @@
+#include <metal_stdlib>
+
+using namespace metal;
+
+struct VertexUniforms {
+    float4x4 transform;
+    float4x4 cameraView;
+    float4x4 projection;
+};
+
+struct VertexIn {
+    float4 position [[attribute(0)]];
+};
+
+struct VertexOut {
+    float4 position [[position]];
+};
+
+vertex VertexOut VSMain(
+    VertexIn input [[stage_in]],
+    constant VertexUniforms &uniforms [[buffer(0)]])
+{
+    VertexOut output = {};
+    output.position = input.position * uniforms.transform;
+    output.position = output.position * uniforms.cameraView;
+    output.position = output.position * uniforms.projection;
+    return output;
+}

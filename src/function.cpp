@@ -139,6 +139,12 @@ double Function::sampleGaussian(double x) const {
     const int closest = closestSample(x);
     const double filterRadius = m_filterRadius * m_gaussianFilter->getRadius();
 
+    // Keep authored function samples exact. Gaussian interpolation smooths
+    // between samples, but must not distort a value at a known knot.
+    if (m_size > 0 && closest >= 0 && m_x[closest] == x) {
+        return m_y[closest] * m_outputScale;
+    }
+
     double sum = 0;
     double totalWeight = 0;
 

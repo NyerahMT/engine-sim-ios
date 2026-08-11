@@ -4,6 +4,8 @@
 #include "../include/gauge.h"
 #include "../include/constants.h"
 #include "../include/engine_sim_application.h"
+
+#include <map>
 #include "../include/ui_utilities.h"
 
 #include <sstream>

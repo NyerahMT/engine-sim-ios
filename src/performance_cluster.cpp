@@ -198,7 +198,7 @@ void PerformanceCluster::render() {
         (float)(m_timePerTimestep / idealTimePerTimestep) * 100.0f;
 
     m_fpsGauge->m_bounds = grid.get(m_bounds, 0, 0);
-    m_fpsGauge->m_gauge->m_value = m_app->getEngine()->GetAverageFramerate();
+    m_fpsGauge->m_gauge->m_value = m_app->getAverageFramerate();
 
     m_simSpeedGauge->m_bounds = grid.get(m_bounds, 2, 0);
     m_simSpeedGauge->m_gauge->m_value = 1 / (float)m_simulator->getSimulationSpeed();

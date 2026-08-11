@@ -172,28 +172,6 @@ void UiElement::resetShader() {
     m_app->getShaders()->SetObjectTransform(ysMath::LoadIdentity());
 }
 
-void UiElement::drawModel(
-    dbasic::ModelAsset *model,
-    const ysVector &color,
-    const Point &p,
-    const Point &s)
-{
-    resetShader();
-
-    const Point p_render = getRenderPoint(p);
-    const Point s_render = pixelsToUnits(s);
-
-    m_app->getShaders()->SetObjectTransform(
-        ysMath::MatMult(
-            ysMath::TranslationTransform(ysMath::LoadVector(p_render.x, p_render.y, 0.0)),
-            ysMath::ScaleTransform(ysMath::LoadVector(s_render.x, s_render.y, 0.0))
-        )
-    );
-
-    m_app->getShaders()->SetBaseColor(color);
-    m_app->getEngine()->DrawModel(m_app->getShaders()->GetUiFlags(), model, 0x11);
-}
-
 void UiElement::drawFrame(
         const Bounds &bounds,
         float thickness,

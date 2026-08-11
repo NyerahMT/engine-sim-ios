@@ -18,13 +18,10 @@ es_script::Compiler::Output *es_script::Compiler::output() {
     return s_output;
 }
 
-void es_script::Compiler::initialize() {
+void es_script::Compiler::initialize(const std::string &assetDirectory) {
     m_compiler = new piranha::Compiler(&m_rules);
     m_compiler->setFileExtension(".mr");
-
-    m_compiler->addSearchPath("../../es/");
-    m_compiler->addSearchPath("../es/");
-    m_compiler->addSearchPath("es/");
+    m_compiler->addSearchPath(assetDirectory + "/es/");
 
     m_rules.initialize();
 }
@@ -62,7 +59,7 @@ es_script::Compiler::Output es_script::Compiler::execute() {
     const bool result = m_program.execute();
 
     if (!result) {
-        // Todo: Runtime error
+        // Runtime errors are reported by the Piranha program.
     }
 
     return *output();

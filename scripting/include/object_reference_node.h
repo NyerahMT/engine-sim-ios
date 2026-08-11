@@ -18,9 +18,9 @@ namespace es_script {
             /* void */
         }
 
-        template <typename Type>
+        template <typename OutputType>
         void overrideType() {
-            m_output.overrideType(LookupChannelType<Type>());
+            m_output.overrideType(LookupChannelType<OutputType>());
         }
 
     protected:

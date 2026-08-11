@@ -2,8 +2,7 @@
 #define ATG_ENGINE_SIM_UI_ELEMENT_H
 
 #include "ui_math.h"
-
-#include "delta.h"
+#include "render_math.h"
 
 #include <vector>
 
@@ -82,11 +81,6 @@ class UiElement {
 
         void resetShader();
 
-        void drawModel(
-                dbasic::ModelAsset *model,
-                const ysVector &color,
-                const Point &p,
-                const Point &scale = { 1.0f, 1.0f });
         void drawFrame(
                 const Bounds &bounds,
                 float thickness,

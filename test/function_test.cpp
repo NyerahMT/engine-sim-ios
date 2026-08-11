@@ -71,10 +71,5 @@ TEST(FunctionTests, FunctionGaussianTest) {
     EXPECT_NEAR(f.sampleGaussian(100.0), 10.0, 1E-3);
     EXPECT_NEAR(f.sampleGaussian(-100.0), 1.0, 1E-3);
 
-    for (double s = 2.0; s <= 3.0; s += 0.001) {
-        const double v = f.sampleGaussian(s);
-        std::cerr << v << "\n";
-    }
-
     f.destroy();
 }

@@ -25,11 +25,11 @@ namespace es_script {
         virtual ~SetEngineNode() { /* void */ }
 
     protected:
-        virtual void registerInputs() {
+        void registerInputs() override {
             registerInput(&m_engineInput, "engine");
         }
 
-        virtual void _evaluate() {
+        void _evaluate() override {
             EngineNode *engineNode = getObject<EngineNode>(m_engineInput);
 
             Engine *engine = new Engine;
@@ -506,7 +506,7 @@ namespace es_script {
             Node::registerInputs();
         }
 
-        virtual void _evaluate() {
+        void _evaluate() override {
             readAllInputs();
 
             Transmission *transmission = new Transmission;

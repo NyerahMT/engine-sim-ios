@@ -40,10 +40,7 @@ void PistonObject::render(const ViewParameters *view) {
         (float)(-m_piston->getCompressionHeight() - m_piston->getWristPinLocation()));
 
     m_app->getShaders()->SetBaseColor(col);
-    m_app->getEngine()->DrawModel(
-        m_app->getShaders()->GetRegularFlags(),
-        m_app->getAssetManager()->GetModelAsset("Piston"),
-        0x32 - layer);
+    m_app->drawModel("Piston", m_app->getShaders()->GetRegularFlags(), 0x32 - layer);
 
     setTransform(&m_piston->m_body);
     m_app->getShaders()->SetBaseColor(holeCol);

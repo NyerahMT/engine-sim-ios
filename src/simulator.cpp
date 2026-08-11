@@ -10,6 +10,7 @@ Simulator::Simulator() {
 
     m_simulationSpeed = 1.0;
     m_targetSynthesizerLatency = 0.1;
+    m_synthesizerLatencyCorrectionEnabled = true;
     m_simulationFrequency = 10000;
     m_steps = 0;
 
@@ -74,14 +75,16 @@ void Simulator::startFrame(double dt) {
     const double timestep = getTimestep();
     m_steps = (int)std::round((dt * m_simulationSpeed) / timestep);
 
-    const double targetLatency = getSynthesizerInputLatencyTarget();
-    if (m_synthesizer.getLatency() < targetLatency) {
-        m_steps = static_cast<int>((m_steps + 1) * 1.1);
-    }
-    else if (m_synthesizer.getLatency() > targetLatency) {
-        m_steps = static_cast<int>((m_steps - 1) * 0.9);
-        if (m_steps < 0) {
-            m_steps = 0;
+    if (m_synthesizerLatencyCorrectionEnabled) {
+        const double targetLatency = getSynthesizerInputLatencyTarget();
+        if (m_synthesizer.getLatency() < targetLatency) {
+            m_steps = static_cast<int>((m_steps + 1) * 1.1);
+        }
+        else if (m_synthesizer.getLatency() > targetLatency) {
+            m_steps = static_cast<int>((m_steps - 1) * 0.9);
+            if (m_steps < 0) {
+                m_steps = 0;
+            }
         }
     }
 
