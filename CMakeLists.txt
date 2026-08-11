@@ -41,13 +41,11 @@ set_property(TARGET simple-2d-constraint-solver PROPERTY FOLDER "third_party/scs
 if(NOT MSVC)
     target_compile_definitions(simple-2d-constraint-solver
         PUBLIC __forceinline=inline)
-    # sparse_matrix.cpp includes its template header before matrix.h. Clang and
-    # GCC correctly reject the resulting incomplete Matrix use, while the
-    # public include order used by the simulator is already valid. Preinclude
-    # the dependency for that legacy translation unit without modifying the
-    # pinned submodule checkout.
+    # The retained upstream solver has a few legacy include-order omissions.
+    # Preinclude their compatibility header without modifying the pinned
+    # submodule checkout.
     target_compile_options(simple-2d-constraint-solver PRIVATE
-        "-include${ENGINE_SIM_SUBMODULE_DIR}/simple-2d-constraint-solver/include/matrix.h")
+        "-include${CMAKE_CURRENT_SOURCE_DIR}/cmake/EngineSimLegacySolverCompatibility.h")
 endif()
 
 set(ENGINE_SIM_CORE_SOURCES

@@ -43,6 +43,24 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
           submodules: recursive
 
+      - name: Install macOS parser tools
+        if: runner.os == 'macOS'
+        run: |
+          brew install bison
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Windows parser tools
+        if: runner.os == 'Windows'
+        run: choco install winflexbison3 --no-progress --yes
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libwayland-dev libdecor-0-dev
+
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
 
