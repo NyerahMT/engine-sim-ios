@@ -85,6 +85,16 @@ jobs:
           cpack --config build/${{ matrix.preset }}/CPackConfig.cmake
           -G ${{ matrix.generator }} ${{ matrix.cpack_arguments }}
 
+      - name: Verify macOS app bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          archive=$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name 'open-engine-simulator-*.zip' -print -quit)
+          test -n "$archive"
+          mkdir package-check
+          ditto -x -k "$archive" package-check
+          codesign --verify --deep --strict --verbose=2 package-check/*/engine-sim.app
+
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:

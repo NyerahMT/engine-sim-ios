@@ -41,10 +41,16 @@ elseif(UNIX)
 endif()
 
 if(APPLE AND ENGINE_SIM_MACOS_APP_BUNDLE)
+    set(ENGINE_SIM_MACOS_BUNDLE_IDENTIFIER "org.openenginesim.desktop")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+        @ONLY)
     set_target_properties(engine-sim-desktop PROPERTIES
         MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
         OUTPUT_NAME "engine-sim")
-    set(ENGINE_SIM_INSTALL_ASSET_DIRECTORY "engine-sim.app/Contents/assets")
+    set(ENGINE_SIM_INSTALL_ASSET_DIRECTORY "engine-sim.app/Contents/Resources/assets")
     set(ENGINE_SIM_INSTALL_RUNTIME_DIRECTORY "engine-sim.app/Contents/MacOS")
     install(TARGETS engine-sim-desktop BUNDLE DESTINATION .)
 else()
@@ -65,4 +71,15 @@ if(TARGET engine-sim-shaders)
         "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.vertex.msl"
         "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.fragment.msl"
         DESTINATION "${ENGINE_SIM_INSTALL_ASSET_DIRECTORY}/shaders")
+endif()
+
+# Sign only after every bundle component has been installed. This is an ad-hoc
+# signature: it makes the archive internally consistent, but Developer ID
+# signing and notarization are still required for seamless Gatekeeper launches.
+if(APPLE AND ENGINE_SIM_MACOS_APP_BUNDLE)
+    install(CODE [[
+        execute_process(
+            COMMAND codesign --force --deep --sign - "${CMAKE_INSTALL_PREFIX}/engine-sim.app"
+            COMMAND_ERROR_IS_FATAL ANY)
+    ]])
 endif()
