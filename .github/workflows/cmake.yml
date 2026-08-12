@@ -1,4 +1,5 @@
 name: Portable CMake checks
+
 on:
   workflow_dispatch:
   push:
@@ -6,66 +7,48 @@ on:
   pull_request:
     branches: [ "master" ]
 
-
 jobs:
-  core:
-    name: Core (${{ matrix.os }})
+  validate:
+    name: Validate (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            configure: linux-x86_64
-            build: linux-x86_64
-            test: linux-x86_64
+          - name: Linux x86_64
+            os: ubuntu-latest
+            preset: linux-x86_64
           # Pin an Apple-Silicon host: macos-latest is arm64 today, but an
           # explicit version makes the architecture and CI target unambiguous.
-          - os: macos-15
-            configure: macos-arm64
-            build: macos-arm64
-            test: macos-arm64
-          - os: windows-latest
-            configure: windows-x86_64
-            build: windows-x86_64
-            test: windows-x86_64
+          - name: macOS arm64
+            os: macos-15
+            preset: macos-arm64
+          - name: Windows x86_64
+            os: windows-latest
+            preset: windows-x86_64
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
       - name: Install macOS parser tools
         if: runner.os == 'macOS'
         run: |
           brew install bison flex
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
       - name: Install Windows parser tools
         if: runner.os == 'Windows'
-        run: choco install winflexbison3 --no-progress --yes
-      - name: Configure
-        run: cmake --preset ${{ matrix.configure }}
-      - name: Build
-        run: cmake --build --preset ${{ matrix.build }}
-      - name: Test
-        run: ctest --preset ${{ matrix.test }}
+        run: |
+          choco install winflexbison3 --no-progress --yes
+          if (-not (Get-Command win_flex.exe -ErrorAction SilentlyContinue)) {
+            throw "winflexbison3 did not provide win_flex.exe"
+          }
+          if (-not (Get-Command win_bison.exe -ErrorAction SilentlyContinue)) {
+            throw "winflexbison3 did not provide win_bison.exe"
+          }
 
-  desktop-audio:
-    name: SDL audio smoke (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            architecture_args: ''
-          - os: macos-15
-            architecture_args: -DCMAKE_OSX_ARCHITECTURES=arm64
-          - os: windows-latest
-            architecture_args: ''
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
@@ -73,14 +56,22 @@ jobs:
           sudo apt-get install --yes \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
             libxi-dev libxss-dev libxkbcommon-dev libwayland-dev libdecor-0-dev
-      - name: Configure SDL audio test
+
+      - name: Configure
         run: >-
-          cmake -S . -B build/ci-desktop-audio -G Ninja
-          -DBUILD_TESTING=ON
+          cmake --preset ${{ matrix.preset }}
           -DENGINE_SIM_BUILD_DESKTOP=ON
-          -DENGINE_SIM_BUILD_SCRIPTING=OFF
-          ${{ matrix.architecture_args }}
-      - name: Build SDL audio smoke test
-        run: cmake --build build/ci-desktop-audio --target engine-sim-desktop-audio-tests
+          -DENGINE_SIM_BUILD_SCRIPTING=ON
+
+      - name: Build
+        run: cmake --build build/${{ matrix.preset }}
+
+      - name: Run core tests
+        run: >-
+          ctest --test-dir build/${{ matrix.preset }} --output-on-failure
+          --exclude-regex SdlAudioOutput
+
       - name: Run SDL audio smoke test
-        run: ctest --test-dir build/ci-desktop-audio --output-on-failure -R SdlAudioOutput
+        run: >-
+          ctest --test-dir build/${{ matrix.preset }} --output-on-failure
+          --tests-regex SdlAudioOutput
