@@ -17,7 +17,6 @@ Choose the archive that matches your computer:
 | Your computer | Download | Run |
 | --- | --- | --- |
 | Apple Silicon Mac (M1/M2/M3/M4) | macOS arm64 ZIP | Open `engine-sim.app` |
-| Intel Mac | No current native release | Use an Apple Silicon or other supported build when available |
 | Windows PC | Windows x86_64 ZIP | Run `bin/engine-sim-desktop.exe` |
 | Linux x86_64 PC | Linux x86_64 `.tar.gz` | Extract it, then run `bin/engine-sim-desktop` |
 
@@ -106,6 +105,9 @@ To configure, build, and test only the portable core:
 ```sh
 make PLATFORM=macos-arm64 portable-test
 ```
+
+To reproduce CI's complete desktop, scripting, and SDL dummy-audio validation,
+use `make PLATFORM=<target> portable-validate`.
 
 On Apple Silicon with Homebrew, install the local prerequisites with:
 

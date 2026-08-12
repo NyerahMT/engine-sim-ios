@@ -1,0 +1,68 @@
+find_package(SDL3 3.2 CONFIG QUIET)
+if(NOT TARGET SDL3::SDL3 AND ENGINE_SIM_FETCH_SDL3)
+    FetchContent_Declare(SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-3.2.8
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL)
+    FetchContent_MakeAvailable(SDL3)
+endif()
+if(NOT TARGET SDL3::SDL3)
+    message(FATAL_ERROR
+        "SDL3 was not found. Install SDL3 or configure with -DENGINE_SIM_FETCH_SDL3=ON.")
+endif()
+
+add_executable(engine-sim-desktop
+    src/desktop_main.cpp
+    src/desktop_platform_sdl.cpp
+    src/sdl_audio_output.cpp
+    src/sdl_gpu_renderer.cpp)
+target_link_libraries(engine-sim-desktop PRIVATE SDL3::SDL3 engine-sim-visualization)
+target_compile_features(engine-sim-desktop PRIVATE cxx_std_17)
+target_compile_definitions(engine-sim-desktop PRIVATE
+    ENGINE_SIM_SHADER_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}/shaders"
+    ENGINE_SIM_SOURCE_ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+if(ENGINE_SIM_BUILD_SCRIPTING)
+    target_link_libraries(engine-sim-desktop PRIVATE engine-sim-scripting)
+    target_compile_definitions(engine-sim-desktop PRIVATE ATG_ENGINE_SIM_PIRANHA_ENABLED)
+endif()
+
+engine_sim_add_shader_artifacts(engine-sim-shaders
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/engine_sim.hlsl"
+    "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+if(TARGET engine-sim-shaders)
+    add_dependencies(engine-sim-desktop engine-sim-shaders)
+endif()
+
+if(APPLE)
+    set_target_properties(engine-sim-desktop PROPERTIES INSTALL_RPATH "@executable_path")
+elseif(UNIX)
+    set_target_properties(engine-sim-desktop PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
+
+if(APPLE AND ENGINE_SIM_MACOS_APP_BUNDLE)
+    set_target_properties(engine-sim-desktop PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME "engine-sim")
+    set(ENGINE_SIM_INSTALL_ASSET_DIRECTORY "engine-sim.app/Contents/assets")
+    set(ENGINE_SIM_INSTALL_RUNTIME_DIRECTORY "engine-sim.app/Contents/MacOS")
+    install(TARGETS engine-sim-desktop BUNDLE DESTINATION .)
+else()
+    set(ENGINE_SIM_INSTALL_ASSET_DIRECTORY "assets")
+    set(ENGINE_SIM_INSTALL_RUNTIME_DIRECTORY "bin")
+    install(TARGETS engine-sim-desktop RUNTIME DESTINATION "${ENGINE_SIM_INSTALL_RUNTIME_DIRECTORY}")
+endif()
+
+install(FILES "$<TARGET_FILE:SDL3::SDL3>" DESTINATION "${ENGINE_SIM_INSTALL_RUNTIME_DIRECTORY}")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/" DESTINATION "${ENGINE_SIM_INSTALL_ASSET_DIRECTORY}"
+    PATTERN ".DS_Store" EXCLUDE)
+if(TARGET engine-sim-shaders)
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.vertex.spv"
+        "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.fragment.spv"
+        "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.vertex.dxil"
+        "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.fragment.dxil"
+        "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.vertex.msl"
+        "${CMAKE_CURRENT_BINARY_DIR}/shaders/engine_sim.fragment.msl"
+        DESTINATION "${ENGINE_SIM_INSTALL_ASSET_DIRECTORY}/shaders")
+endif()

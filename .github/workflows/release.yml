@@ -47,8 +47,6 @@ jobs:
             preset: linux-x86_64-desktop
             generator: TGZ
             extension: tar.gz
-            cc: clang
-            cxx: clang++
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,9 +75,6 @@ jobs:
             libxi-dev libxss-dev libxkbcommon-dev libwayland-dev libdecor-0-dev
 
       - name: Configure
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
         run: cmake --preset ${{ matrix.preset }}
 
       - name: Build
