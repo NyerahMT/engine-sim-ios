@@ -43,7 +43,7 @@ private:
 
     // The source font has individual advances; retaining them keeps aligned
     // dashboard labels from drifting like a monospaced replacement would.
-    static constexpr float silkscreenAdvance(char character) {
+    static float silkscreenAdvance(char character) {
         const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(character)));
         switch (c) {
             case 'I': return 0.3571429f;
@@ -54,7 +54,7 @@ private:
         }
     }
 
-    static constexpr float characterAdvance(char character) {
+    static float characterAdvance(char character) {
         return CharacterAdvance * silkscreenAdvance(character) / NormalAdvance;
     }
 

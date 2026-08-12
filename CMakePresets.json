@@ -90,6 +90,7 @@
       "name": "windows-x86_64-desktop",
       "displayName": "Windows x86_64 SDL desktop host",
       "inherits": "windows-x86_64",
+      "generator": "Visual Studio 17 2022",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "BUILD_TESTING": "OFF",
@@ -133,7 +134,8 @@
     },
     {
       "name": "windows-x86_64-desktop",
-      "configurePreset": "windows-x86_64-desktop"
+      "configurePreset": "windows-x86_64-desktop",
+      "configuration": "RelWithDebInfo"
     },
     {
       "name": "macos-arm64-package",

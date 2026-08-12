@@ -6,6 +6,7 @@
 #include "../include/engine_sim_application.h"
 
 #include <cmath>
+#include <climits>
 #include <sstream>
 
 RightGaugeCluster::RightGaugeCluster() {

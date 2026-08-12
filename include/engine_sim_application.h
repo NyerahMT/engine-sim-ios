@@ -22,6 +22,8 @@
 #include "info_cluster.h"
 #include "application_settings.h"
 #include "desktop_platform.h"
+
+#include <string>
 #include "runtime_paths.h"
 #include "sdl_gpu_renderer.h"
 #include "text_renderer.h"

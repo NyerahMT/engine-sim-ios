@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <thread>
 
 class SdlAudioOutput final : public AudioOutput {

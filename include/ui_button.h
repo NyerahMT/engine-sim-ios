@@ -3,6 +3,8 @@
 
 #include "ui_element.h"
 
+#include <string>
+
 class UiButton : public UiElement {
     public:
         UiButton();

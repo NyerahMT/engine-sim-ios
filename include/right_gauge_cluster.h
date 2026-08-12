@@ -12,6 +12,8 @@
 #include "afr_cluster.h"
 #include "fuel_cluster.h"
 
+#include <string>
+
 class RightGaugeCluster : public UiElement {
     public:
         RightGaugeCluster();

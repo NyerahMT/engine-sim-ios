@@ -4,6 +4,7 @@
 #include "ui_math.h"
 #include "render_math.h"
 
+#include <string>
 #include <vector>
 
 class EngineSimApplication;

@@ -161,6 +161,23 @@ if(ENGINE_SIM_BUILD_SCRIPTING)
     # rather than emitting a late parser-generation error from an old system
     # Bison (notably macOS's bundled 2.3).
     find_package(BISON 3.2 REQUIRED)
+    # Flex generates C++ scanners that must compile against the matching
+    # FlexLexer.h. The legacy Piranha copy is from Flex 2.5 and is not ABI
+    # compatible with Flex 2.6-generated scanners.
+    set(ENGINE_SIM_FLEX_INCLUDE_DIR "${FLEX_INCLUDE_DIRS}")
+    if(NOT ENGINE_SIM_FLEX_INCLUDE_DIR
+        OR ENGINE_SIM_FLEX_INCLUDE_DIR MATCHES "-NOTFOUND$")
+        find_path(ENGINE_SIM_FLEX_INCLUDE_DIR FlexLexer.h
+            HINTS
+                "/opt/homebrew/opt/flex/include"
+                "/usr/local/opt/flex/include"
+                "C:/ProgramData/chocolatey/lib/winflexbison3/tools")
+    endif()
+    if(NOT ENGINE_SIM_FLEX_INCLUDE_DIR
+        OR ENGINE_SIM_FLEX_INCLUDE_DIR MATCHES "-NOTFOUND$")
+        message(FATAL_ERROR
+            "FlexLexer.h was not found. Install the development headers for Flex.")
+    endif()
     set(ENGINE_SIM_PIRANHA_DIR "${ENGINE_SIM_SUBMODULE_DIR}/piranha")
     flex_target(engine_sim_piranha_lexer
         "${ENGINE_SIM_PIRANHA_DIR}/flex-bison/scanner.l"
@@ -184,6 +201,7 @@ if(ENGINE_SIM_BUILD_SCRIPTING)
             "${ENGINE_SIM_PIRANHA_DIR}/include"
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
             "${CMAKE_CURRENT_BINARY_DIR}/piranha"
+            "${ENGINE_SIM_FLEX_INCLUDE_DIR}"
             "${ENGINE_SIM_PIRANHA_DIR}/dependencies/libraries/flex/include")
     target_compile_features(piranha PUBLIC cxx_std_17)
     if(NOT MSVC)
@@ -361,6 +379,12 @@ if(BUILD_TESTING)
             PRIVATE SDL3::SDL3 engine-sim::core gtest_main)
         target_compile_definitions(engine-sim-desktop-audio-tests PRIVATE
             ENGINE_SIM_TEST_ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+        if(WIN32)
+            add_custom_command(TARGET engine-sim-desktop-audio-tests POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:SDL3::SDL3>"
+                    "$<TARGET_FILE_DIR:engine-sim-desktop-audio-tests>")
+        endif()
         gtest_discover_tests(engine-sim-desktop-audio-tests)
     endif()
 endif()

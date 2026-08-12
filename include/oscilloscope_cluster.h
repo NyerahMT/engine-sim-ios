@@ -6,6 +6,8 @@
 #include "simulator.h"
 #include "oscilloscope.h"
 
+#include <string>
+
 class OscilloscopeCluster : public UiElement {
     private:
         static constexpr int MaxLayeredScopes = 5;

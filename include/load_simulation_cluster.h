@@ -6,6 +6,8 @@
 #include "simulator.h"
 #include "labeled_gauge.h"
 
+#include <string>
+
 class LoadSimulationCluster : public UiElement {
     public:
         LoadSimulationCluster();

@@ -4,6 +4,7 @@
 #include "desktop_platform.h"
 
 #include <array>
+#include <string>
 
 struct SDL_Window;
 
