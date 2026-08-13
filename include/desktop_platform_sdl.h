@@ -30,6 +30,7 @@ public:
     int windowHeight() const override { return m_windowHeight; }
     bool isFullscreen() const override { return m_fullscreen; }
     void setFullscreen(bool enabled) override;
+    bool openUrl(const std::string &url) override;
     void *nativeWindowHandle() const override { return m_window; }
     std::uint64_t ticks() const override;
     void delay(std::uint32_t milliseconds) const override;

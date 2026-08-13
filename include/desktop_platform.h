@@ -56,6 +56,7 @@ public:
     virtual int windowHeight() const = 0;
     virtual bool isFullscreen() const = 0;
     virtual void setFullscreen(bool enabled) = 0;
+    virtual bool openUrl(const std::string &url) = 0;
     virtual void *nativeWindowHandle() const = 0;
     virtual std::uint64_t ticks() const = 0;
     virtual void delay(std::uint32_t milliseconds) const = 0;

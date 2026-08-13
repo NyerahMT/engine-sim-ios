@@ -19,7 +19,7 @@ namespace {
 constexpr float EngineViewCompositionOffsetY = -0.12f;
 }
 
-std::string EngineSimApplication::s_buildVersion = "0.2.0";
+std::string EngineSimApplication::s_buildVersion = "0.2.2";
 
 EngineSimApplication::EngineSimApplication()
     : m_platform(nullptr), m_renderer(nullptr), m_audioOutput(nullptr), m_iceEngine(nullptr),
@@ -73,7 +73,7 @@ void EngineSimApplication::initialize(
         GeometryGenerator::GeometryIndices indices;
         m_geometryGenerator.endShape(&indices);
         m_shaders.SetBaseColor(color);
-        drawGenerated(indices, 0x20, m_shaders.GetUiFlags());
+        drawGenerated(indices, 0x20 + m_textRenderer.renderLayer(), m_shaders.GetUiFlags());
     });
     initialize();
 }
@@ -164,10 +164,13 @@ void EngineSimApplication::process(float dt) {
 }
 
 void EngineSimApplication::render() {
-    for (SimulationObject *object : m_objects) object->generateGeometry();
-    for (int sublayer = 0; sublayer < 3; ++sublayer) {
-        m_viewParameters.Sublayer = sublayer;
-        for (SimulationObject *object : m_objects) object->render(&m_viewParameters);
+    const bool controlsVisible = m_infoCluster != nullptr && m_infoCluster->controlsVisible();
+    if (!controlsVisible) {
+        for (SimulationObject *object : m_objects) object->generateGeometry();
+        for (int sublayer = 0; sublayer < 3; ++sublayer) {
+            m_viewParameters.Sublayer = sublayer;
+            for (SimulationObject *object : m_objects) object->render(&m_viewParameters);
+        }
     }
     if (m_engineView != nullptr) m_uiManager.render();
 }
@@ -179,6 +182,7 @@ void EngineSimApplication::renderScene() {
         const Bounds windowBounds(static_cast<float>(m_screenWidth), static_cast<float>(m_screenHeight),
             { 0.0f, static_cast<float>(m_screenHeight) });
         if (m_screen == 0) {
+            const bool controlsVisible = m_infoCluster->controlsVisible();
             Grid dashboard = { 3, 2 };
             Grid dashboardThirds = { 3, 3 };
             Grid topStack = { 1, 3 };
@@ -191,12 +195,12 @@ void EngineSimApplication::renderScene() {
             const Bounds upperLeft = dashboardThirds.get(windowBounds, 0, 0);
             m_mixerCluster->m_bounds = topStack.get(upperLeft, 0, 2);
             m_infoCluster->m_bounds = topStack.get(upperLeft, 0, 0, 1, 2);
-            m_engineView->setVisible(true);
-            m_rightGaugeCluster->setVisible(true);
-            m_oscCluster->setVisible(true);
-            m_performanceCluster->setVisible(true);
-            m_loadSimulationCluster->setVisible(true);
-            m_mixerCluster->setVisible(true);
+            m_engineView->setVisible(!controlsVisible);
+            m_rightGaugeCluster->setVisible(!controlsVisible);
+            m_oscCluster->setVisible(!controlsVisible);
+            m_performanceCluster->setVisible(!controlsVisible);
+            m_loadSimulationCluster->setVisible(!controlsVisible);
+            m_mixerCluster->setVisible(!controlsVisible);
             m_infoCluster->setVisible(true);
         }
         else if (m_screen == 1) {

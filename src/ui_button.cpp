@@ -6,6 +6,9 @@
 UiButton::UiButton() {
     m_text = "";
     m_fontSize = 12;
+    m_inverted = false;
+    m_drawFrame = true;
+    m_layer = 0x11;
     m_checkMouse = true;
 }
 
@@ -18,14 +21,23 @@ void UiButton::update(float dt) {
 }
 
 void UiButton::render() {
-    ysVector color = m_app->getBackgroundColor();
+    const ysVector foreground = m_app->getForegroundColor();
+    const ysVector background = m_app->getBackgroundColor();
+    ysVector color = m_inverted ? foreground : background;
     if (isMouseHeld()) {
-        color = mix(m_app->getBackgroundColor(), m_app->getForegroundColor(), 0.02f);
+        color = mix(color, m_inverted ? background : foreground, 0.08f);
     }
     else if (isMouseOver()) {
-        color = mix(m_app->getBackgroundColor(), m_app->getForegroundColor(), 0.01f);
+        color = mix(color, m_inverted ? background : foreground, 0.04f);
     }
 
-    drawFrame(m_bounds, 1.0, m_app->getForegroundColor(), color);
+    if (m_drawFrame) {
+        drawFrame(m_bounds, 1.0, m_inverted ? background : foreground, color, true, m_layer);
+    }
+    else {
+        drawBox(m_bounds, color, m_layer);
+    }
+    m_app->getTextRenderer()->SetColor(m_inverted ? background : foreground);
     drawCenteredText(m_text, m_bounds, m_fontSize, Bounds::center);
+    m_app->getTextRenderer()->SetColor(foreground);
 }

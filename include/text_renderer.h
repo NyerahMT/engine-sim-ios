@@ -31,6 +31,8 @@ public:
     using RenderCallback = std::function<void(const std::vector<Run> &, const ysVector &)>;
     void SetColor(const ysVector &color) { m_color = color; }
     const ysVector &color() const { return m_color; }
+    void setRenderLayer(int layer) { m_renderLayer = layer; }
+    int renderLayer() const { return m_renderLayer; }
 
     float CalculateWidth(const std::string &text, float height) const;
     void setRenderCallback(RenderCallback callback) { m_renderCallback = std::move(callback); }
@@ -124,6 +126,7 @@ private:
     }
 
     ysVector m_color = ysMath::Constants::One;
+    int m_renderLayer = 0;
     RenderCallback m_renderCallback;
 };
 

@@ -192,6 +192,10 @@ void DesktopPlatformSdl::setFullscreen(bool enabled) {
     m_fullscreen = enabled;
 }
 
+bool DesktopPlatformSdl::openUrl(const std::string &url) {
+    return SDL_OpenURL(url.c_str());
+}
+
 std::uint64_t DesktopPlatformSdl::ticks() const { return SDL_GetTicks(); }
 void DesktopPlatformSdl::delay(std::uint32_t milliseconds) const { SDL_Delay(milliseconds); }
 

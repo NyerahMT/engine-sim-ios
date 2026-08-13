@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(engine-sim VERSION 0.2.0 LANGUAGES CXX)
+project(engine-sim VERSION 0.2.2 LANGUAGES CXX)
 
 include(CTest)
 include(FetchContent)

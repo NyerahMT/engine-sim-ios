@@ -12,6 +12,11 @@
 - Validate proportional to the change: `make PLATFORM=<target> portable-test`
   for core changes; rebuild the desktop target for host/render/audio changes.
   Run the script compile and SDL dummy-audio tests when touching their paths.
+- For web-visible UI, layout, input, or rendering changes, run `make web`,
+  serve that freshly built `build/web/web` output, and inspect the changed
+  interaction with Browser Use before reporting success. A compile alone is
+  not visual validation; confirm the local server is serving the rebuilt
+  artifact rather than a stale development process.
 - Keep public wording accurate: this is an independent, community-driven fork
   of AngeTheGreat's Engine Simulator. Preserve upstream attribution and MIT
   notices.
