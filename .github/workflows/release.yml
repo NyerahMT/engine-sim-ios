@@ -1,4 +1,4 @@
-name: Release desktop packages
+name: Release packages and web app
 
 on:
   push:
@@ -24,7 +24,7 @@ permissions:
   contents: write
 
 jobs:
-  package:
+  package-desktop:
     name: Package ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -69,7 +69,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes \
-            libfl-dev \
+            bison flex libfl-dev \
             clang \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
             libxi-dev libxss-dev libxkbcommon-dev libwayland-dev libdecor-0-dev
@@ -98,13 +98,43 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.preset }}
+          name: desktop-${{ matrix.preset }}
           path: open-engine-simulator-*.${{ matrix.extension }}
+          if-no-files-found: error
+
+  build-web:
+    name: Build web app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
+          submodules: recursive
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Install scripting parser tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bison flex libfl-dev
+
+      - name: Configure web host
+        run: emcmake cmake --preset web
+
+      - name: Build web host
+        run: cmake --build --preset web --parallel
+
+      - name: Upload web app
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-app
+          path: build/web/web
           if-no-files-found: error
 
   release:
     name: Create GitHub release
-    needs: package
+    needs: [package-desktop, build-web]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-latest
     steps:
@@ -116,6 +146,7 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
+          pattern: desktop-*
           path: release-assets
           merge-multiple: true
 
@@ -131,7 +162,7 @@ jobs:
 
   publish-web:
     name: Publish web build
-    needs: release
+    needs: [build-web, release]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-latest
     steps:
@@ -140,13 +171,11 @@ jobs:
           ref: ${{ inputs.ref || inputs.tag || github.ref }}
           submodules: recursive
 
-      - name: Set up Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-
-      - name: Build web host
-        run: |
-          emcmake cmake --preset web
-          cmake --build --preset web --parallel
+      - name: Download web app
+        uses: actions/download-artifact@v4
+        with:
+          name: web-app
+          path: web-app
 
       - name: Deploy to Cloudflare Pages
         env:
@@ -154,7 +183,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          npx wrangler@4 pages deploy build/web/web \
+          npx wrangler@4 pages deploy web-app \
             --project-name=open-engine-sim \
             --commit-hash="$(git rev-parse HEAD)" \
             --commit-message="Release $RELEASE_TAG"
