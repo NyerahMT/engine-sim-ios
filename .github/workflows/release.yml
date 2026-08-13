@@ -157,7 +157,7 @@ jobs:
         run: >-
           gh release create "$RELEASE_TAG" release-assets/*
           --verify-tag
-          --title "Open Engine Simulator $RELEASE_TAG"
+          --title "$RELEASE_TAG"
           --generate-notes
 
   publish-web:
