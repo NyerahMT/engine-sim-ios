@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 
 namespace {
 // Compose the engine below the camera origin independently of user pan state.
@@ -81,7 +83,7 @@ void EngineSimApplication::initialize(
 void EngineSimApplication::initialize() {
     // Scripting and audio adapters attach after the desktop lifecycle. This
     // method intentionally contains no window, renderer, or audio-device API.
-    loadScript();
+    loadScript(m_currentScriptPath);
 }
 
 void EngineSimApplication::run() {
@@ -111,7 +113,7 @@ bool EngineSimApplication::tick() {
 
     if (m_platform->wasKeyPressed(DesktopKey::F)) toggleFullscreen();
     if (m_platform->wasKeyPressed(DesktopKey::Tab)) m_screen = (m_screen + 1) % 3;
-    if (m_platform->wasKeyPressed(DesktopKey::Return)) loadScript();
+    if (m_platform->wasKeyPressed(DesktopKey::Return)) loadScript(m_currentScriptPath);
     m_screenWidth = m_platform->windowWidth();
     m_screenHeight = m_platform->windowHeight();
 
@@ -120,6 +122,11 @@ bool EngineSimApplication::tick() {
         if (!m_paused || m_platform->wasKeyPressed(DesktopKey::Right)) process(dt);
     }
     if (m_engineView != nullptr) m_uiManager.update(dt);
+    if (!m_pendingScriptPath.empty()) {
+        const std::string selectedScript = m_pendingScriptPath;
+        m_pendingScriptPath.clear();
+        if (loadScript(selectedScript)) m_currentScriptPath = selectedScript;
+    }
     // Rendering is substantially more expensive than the audio-producing
     // simulation on the SDL path. Reserve CPU slices for simulation so
     // the audio stream is never starved by presentation work.
@@ -164,13 +171,10 @@ void EngineSimApplication::process(float dt) {
 }
 
 void EngineSimApplication::render() {
-    const bool controlsVisible = m_infoCluster != nullptr && m_infoCluster->controlsVisible();
-    if (!controlsVisible) {
-        for (SimulationObject *object : m_objects) object->generateGeometry();
-        for (int sublayer = 0; sublayer < 3; ++sublayer) {
-            m_viewParameters.Sublayer = sublayer;
-            for (SimulationObject *object : m_objects) object->render(&m_viewParameters);
-        }
+    for (SimulationObject *object : m_objects) object->generateGeometry();
+    for (int sublayer = 0; sublayer < 3; ++sublayer) {
+        m_viewParameters.Sublayer = sublayer;
+        for (SimulationObject *object : m_objects) object->render(&m_viewParameters);
     }
     if (m_engineView != nullptr) m_uiManager.render();
 }
@@ -182,7 +186,6 @@ void EngineSimApplication::renderScene() {
         const Bounds windowBounds(static_cast<float>(m_screenWidth), static_cast<float>(m_screenHeight),
             { 0.0f, static_cast<float>(m_screenHeight) });
         if (m_screen == 0) {
-            const bool controlsVisible = m_infoCluster->controlsVisible();
             Grid dashboard = { 3, 2 };
             Grid dashboardThirds = { 3, 3 };
             Grid topStack = { 1, 3 };
@@ -195,12 +198,12 @@ void EngineSimApplication::renderScene() {
             const Bounds upperLeft = dashboardThirds.get(windowBounds, 0, 0);
             m_mixerCluster->m_bounds = topStack.get(upperLeft, 0, 2);
             m_infoCluster->m_bounds = topStack.get(upperLeft, 0, 0, 1, 2);
-            m_engineView->setVisible(!controlsVisible);
-            m_rightGaugeCluster->setVisible(!controlsVisible);
-            m_oscCluster->setVisible(!controlsVisible);
-            m_performanceCluster->setVisible(!controlsVisible);
-            m_loadSimulationCluster->setVisible(!controlsVisible);
-            m_mixerCluster->setVisible(!controlsVisible);
+            m_engineView->setVisible(true);
+            m_rightGaugeCluster->setVisible(true);
+            m_oscCluster->setVisible(true);
+            m_performanceCluster->setVisible(true);
+            m_loadSimulationCluster->setVisible(true);
+            m_mixerCluster->setVisible(true);
             m_infoCluster->setVisible(true);
         }
         else if (m_screen == 1) {
@@ -310,14 +313,31 @@ void EngineSimApplication::configure(const ApplicationSettings &settings) {
     if (settings.startFullscreen) m_platform->setFullscreen(true);
 }
 
-void EngineSimApplication::loadScript() {
+void EngineSimApplication::requestEngineScript(const std::string &relativeScriptPath) {
+    if (!relativeScriptPath.empty()) m_pendingScriptPath = relativeScriptPath;
+}
+
+bool EngineSimApplication::loadScript(const std::string &relativeScriptPath) {
 #if defined(ATG_ENGINE_SIM_PIRANHA_ENABLED)
     es_script::Compiler compiler;
     compiler.initialize(m_assetPath);
     Engine *engine = nullptr;
     Vehicle *vehicle = nullptr;
     Transmission *transmission = nullptr;
-    if (compiler.compile(m_assetPath + "/main.mr")) {
+    std::filesystem::path scriptPath = std::filesystem::path(m_assetPath) / relativeScriptPath;
+    std::filesystem::path entryPointPath = scriptPath;
+    std::filesystem::path generatedEntryPoint;
+    // Engine files define public node main but do not invoke it. The normal
+    // main.mr does exactly that after importing an engine, so create the same
+    // tiny entry point in the temporary filesystem for a selected catalog item.
+    if (relativeScriptPath != "main.mr") {
+        generatedEntryPoint = std::filesystem::temp_directory_path() / "engine-sim-picker-entry.mr";
+        std::ofstream entryPoint(generatedEntryPoint);
+        entryPoint << "import \"" << scriptPath.generic_string() << "\"\n\nmain()\n";
+        entryPoint.close();
+        entryPointPath = generatedEntryPoint;
+    }
+    if (compiler.compile(entryPointPath.string())) {
         const es_script::Compiler::Output output = compiler.execute();
         configure(output.applicationSettings);
         engine = output.engine;
@@ -325,12 +345,19 @@ void EngineSimApplication::loadScript() {
         transmission = output.transmission;
     }
     compiler.destroy();
+    if (!generatedEntryPoint.empty()) {
+        std::error_code ignored;
+        std::filesystem::remove(generatedEntryPoint, ignored);
+    }
     // A failed hot reload must leave the currently running simulation intact;
     // otherwise a transient file error turns Return into a destructive reset.
     if (engine != nullptr && vehicle != nullptr && transmission != nullptr) {
         loadEngine(engine, vehicle, transmission);
+        return true;
     }
+    if (m_infoCluster != nullptr) m_infoCluster->setLogMessage("Engine script failed to load");
 #endif
+    return false;
 }
 void EngineSimApplication::processEngineInput(float dt) {
     if (m_iceEngine == nullptr || m_simulator == nullptr) return;
@@ -474,6 +501,10 @@ void EngineSimApplication::toggleFullscreen() {
     if (m_platform != nullptr) m_platform->setFullscreen(!m_platform->isFullscreen());
 }
 
+void EngineSimApplication::showControlsOverlay() { m_uiManager.showControlsOverlay(); }
+
+void EngineSimApplication::showEnginePickerOverlay() { m_uiManager.showEnginePickerOverlay(); }
+
 void EngineSimApplication::refreshUserInterface() {
     m_uiManager.destroy();
     m_engineView = nullptr;
@@ -515,6 +546,17 @@ void EngineSimApplication::loadEngine(Engine *engine, Vehicle *vehicle, Transmis
     if (m_iceEngine != nullptr) { m_iceEngine->destroy(); delete m_iceEngine; }
     delete m_vehicle;
     delete m_transmission;
+    // The transmission object starts in neutral, but these controls belong to
+    // the host rather than a script. Reset them too so a replacement engine
+    // cannot inherit throttle or clutch load from one that was in gear.
+    m_speedSetting = 0.0;
+    m_targetSpeedSetting = 0.0;
+    m_touchThrottle = 0.0;
+    m_touchThrottleHeld = false;
+    m_touchStarterHeld = false;
+    m_clutchPressure = 0.0;
+    m_targetClutchPressure = 0.0;
+    m_dynoSpeed = 0.0;
     m_iceEngine = engine;
     m_vehicle = vehicle;
     m_transmission = transmission;
