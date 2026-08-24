@@ -1,0 +1,155 @@
+name: iOS Core Build
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-core:
+    name: EngineSim Core - iPhone arm64
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout EngineSim
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Show Apple toolchain
+        run: |
+          echo "macOS:"
+          sw_vers
+
+          echo
+          echo "Xcode:"
+          xcodebuild -version
+
+          echo
+          echo "iPhoneOS SDK:"
+          xcrun --sdk iphoneos --show-sdk-version
+
+          echo
+          echo "iPhoneOS SDK path:"
+          xcrun --sdk iphoneos --show-sdk-path
+
+          echo
+          echo "Apple Clang:"
+          xcrun --sdk iphoneos clang++ --version
+
+          echo
+          echo "CMake:"
+          cmake --version
+
+          echo
+          echo "Ninja:"
+          ninja --version
+
+      - name: Verify submodules
+        run: |
+          test -f dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
+          test -f dependencies/submodules/csv-io/CMakeLists.txt
+          test -f dependencies/submodules/piranha/CMakeLists.txt
+
+          echo "All required EngineSim submodules are present."
+
+      - name: Configure EngineSim for iPhone
+        run: |
+          cmake --preset ios-arm64
+
+      - name: Build EngineSim simulation core
+        run: |
+          cmake --build --preset ios-arm64 --verbose
+
+      - name: Locate compiled library
+        run: |
+          echo "Searching for EngineSim core library..."
+
+          find build/ios-arm64 \
+            -type f \
+            \( -name "libengine-sim-core.a" -o -name "engine-sim-core.lib" \) \
+            -print
+
+          CORE_LIBRARY="$(find build/ios-arm64 -type f -name "libengine-sim-core.a" | head -n 1)"
+
+          if [ -z "$CORE_LIBRARY" ]; then
+            echo "ERROR: libengine-sim-core.a was not produced."
+            exit 1
+          fi
+
+          echo
+          echo "Built library:"
+          echo "$CORE_LIBRARY"
+
+          echo
+          echo "Architecture information:"
+          lipo -info "$CORE_LIBRARY"
+
+          echo
+          echo "File information:"
+          file "$CORE_LIBRARY"
+
+      - name: Validate arm64
+        run: |
+          CORE_LIBRARY="$(find build/ios-arm64 -type f -name "libengine-sim-core.a" | head -n 1)"
+
+          if [ -z "$CORE_LIBRARY" ]; then
+            echo "EngineSim core library is missing."
+            exit 1
+          fi
+
+          ARCH_INFO="$(lipo -info "$CORE_LIBRARY")"
+
+          echo "$ARCH_INFO"
+
+          if ! echo "$ARCH_INFO" | grep -q "arm64"; then
+            echo "ERROR: EngineSim core was not compiled for arm64."
+            exit 1
+          fi
+
+          echo
+          echo "SUCCESS: EngineSim core compiled for iPhone arm64."
+
+      - name: Package core artifact
+        if: success()
+        run: |
+          mkdir -p artifacts/engine-sim-ios-core
+
+          CORE_LIBRARY="$(find build/ios-arm64 -type f -name "libengine-sim-core.a" | head -n 1)"
+
+          cp "$CORE_LIBRARY" artifacts/engine-sim-ios-core/
+
+          cp -R include artifacts/engine-sim-ios-core/include
+
+          cat > artifacts/engine-sim-ios-core/BUILD_INFO.txt <<EOF
+          EngineSim iOS core build
+          ========================
+
+          Platform: iOS
+          SDK: iPhoneOS
+          Architecture: arm64
+          Configuration: Debug
+
+          This artifact contains the first native iOS build
+          of the EngineSim simulation core.
+
+          Desktop host: disabled
+          Web host: disabled
+          SDL: disabled
+          Scripting: disabled
+          Tests: disabled
+          EOF
+
+      - name: Upload EngineSim iOS core
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-sim-ios-core-arm64
+          path: artifacts/engine-sim-ios-core
+          if-no-files-found: error
