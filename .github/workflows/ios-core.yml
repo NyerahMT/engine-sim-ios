@@ -76,6 +76,27 @@ jobs:
             "EngineSim submodules are present."
 
 
+      - name: Verify app icon source
+        run: |
+          ICON="ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
+
+          CONTENTS="ios/Assets.xcassets/AppIcon.appiconset/Contents.json"
+
+          if [ ! -f "$ICON" ]; then
+            echo "ERROR: AppIcon.png is missing."
+            exit 1
+          fi
+
+          if [ ! -f "$CONTENTS" ]; then
+            echo "ERROR: AppIcon Contents.json is missing."
+            exit 1
+          fi
+
+          echo "App icon source exists."
+
+          file "$ICON"
+
+
       - name: Configure SDL3 iOS host
         run: |
           rm -rf build/ios-sdl
@@ -153,17 +174,11 @@ jobs:
 
           EXECUTABLE="$APP_PATH/EngineSim"
 
-          echo \
-            "================================"
+          echo "================================"
+          echo "Executable"
+          echo "================================"
 
-          echo \
-            "Executable"
-
-          echo \
-            "================================"
-
-          file \
-            "$EXECUTABLE"
+          file "$EXECUTABLE"
 
           echo
 
@@ -172,18 +187,49 @@ jobs:
             "$EXECUTABLE"
 
           echo
-          echo \
-            "================================"
-
-          echo \
-            "Bundle"
-
-          echo \
-            "================================"
+          echo "================================"
+          echo "Application bundle"
+          echo "================================"
 
           ls \
             -lah \
             "$APP_PATH"
+
+
+      - name: Verify compiled app icon
+        run: |
+          APP_PATH="$(
+            find build/ios-sdl \
+              -type d \
+              -name 'EngineSim.app' \
+              | head -n 1
+          )"
+
+          echo "Checking compiled asset catalog..."
+
+          if [ ! -f "$APP_PATH/Assets.car" ]; then
+            echo
+            echo "ERROR:"
+            echo "Assets.car was not generated."
+            echo "The application icon was not compiled."
+            exit 1
+          fi
+
+          echo
+          echo "Compiled asset catalog:"
+          ls -lh "$APP_PATH/Assets.car"
+
+          echo
+          echo "Checking Info.plist icon metadata..."
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIcons" \
+            "$APP_PATH/Info.plist" \
+            || true
+
+          echo
+          echo "SUCCESS:"
+          echo "iOS application asset catalog is bundled."
 
 
       - name: Inspect SDL linkage
@@ -273,9 +319,6 @@ jobs:
           EngineSim iOS
           =============
 
-          Milestone:
-          SDL3 native graphics host
-
           Platform:
           iPhoneOS
 
@@ -285,9 +328,6 @@ jobs:
           SDL3:
           enabled
 
-          SDL iOS lifecycle:
-          enabled
-
           SDL graphics:
           enabled
 
@@ -295,27 +335,22 @@ jobs:
           enabled
 
           EngineSim core:
-          compiled for iOS
+          enabled
 
           EngineSim visualization:
-          compiled for iOS
+          compiled
 
-          EngineSim real GPU renderer:
-          next milestone
+          App icon:
+          compiled into asset catalog
 
-          EngineSim simulation connection:
-          next milestone
+          Real EngineSim renderer:
+          in progress
 
           Audio:
-          not yet enabled
+          in progress
 
           Signing:
           disabled
-
-          Expected on-device result:
-          EngineSim-style SDL dashboard
-          with animated tachometer and
-          touch-controlled throttle.
           EOF
 
           cd \
