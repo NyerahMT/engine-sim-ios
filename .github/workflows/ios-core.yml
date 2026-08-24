@@ -1,4 +1,4 @@
-name: iOS App Build
+name: iOS SDL3 Graphics Build
 
 on:
   push:
@@ -15,9 +15,9 @@ permissions:
 
 jobs:
 
-  ios-app:
+  ios-sdl:
 
-    name: EngineSim iPhone App
+    name: EngineSim SDL3 iPhone Build
 
     runs-on: macos-15
 
@@ -29,7 +29,7 @@ jobs:
           submodules: recursive
 
 
-      - name: Show Apple toolchain
+      - name: Show build environment
         run: |
           echo "================================"
           echo "macOS"
@@ -49,9 +49,9 @@ jobs:
           echo "iPhoneOS SDK"
           echo "================================"
 
-          xcrun --sdk iphoneos --show-sdk-version
-
-          xcrun --sdk iphoneos --show-sdk-path
+          xcrun \
+            --sdk iphoneos \
+            --show-sdk-version
 
           echo
           echo "================================"
@@ -61,7 +61,7 @@ jobs:
           cmake --version
 
 
-      - name: Verify EngineSim submodules
+      - name: Verify EngineSim dependencies
         run: |
           test -f \
             dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
@@ -72,28 +72,42 @@ jobs:
           test -f \
             dependencies/submodules/piranha/CMakeLists.txt
 
-          echo "EngineSim dependencies are present."
+          echo \
+            "EngineSim submodules are present."
 
 
-      - name: Configure native iOS application
+      - name: Configure SDL3 iOS host
         run: |
-          rm -rf build/ios-app
+          rm -rf build/ios-sdl
 
           cmake \
             -S ios \
-            -B build/ios-app \
+            -B build/ios-sdl \
             -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DENGINE_SIM_FETCH_SDL3=ON \
+            -DBUILD_SHARED_LIBS=OFF
 
 
-      - name: Build EngineSim iOS application
+      - name: Build EngineSim visualization for iOS
         run: |
           cmake \
-            --build build/ios-app \
+            --build build/ios-sdl \
+            --config Release \
+            --target engine-sim-visualization \
+            -- \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+
+      - name: Build SDL3 EngineSim application
+        run: |
+          cmake \
+            --build build/ios-sdl \
             --config Release \
             --target EngineSimIOS \
             -- \
@@ -101,167 +115,166 @@ jobs:
             CODE_SIGNING_REQUIRED=NO
 
 
-      - name: Find generated app
+      - name: Find application
         run: |
-          echo "Searching for EngineSim.app..."
-
-          find build/ios-app \
-            -type d \
-            -name "EngineSim.app" \
-            -print
-
           APP_PATH="$(
-            find build/ios-app \
+            find build/ios-sdl \
               -type d \
-              -name "EngineSim.app" \
+              -name 'EngineSim.app' \
               | head -n 1
           )"
 
           if [ -z "$APP_PATH" ]; then
-            echo "ERROR: EngineSim.app was not generated."
 
-            echo
-            echo "Available .app directories:"
+            echo \
+              "ERROR: EngineSim.app not generated."
 
-            find build/ios-app \
+            find build/ios-sdl \
               -type d \
-              -name "*.app" \
+              -name '*.app' \
               -print
 
             exit 1
+
           fi
 
-          echo
-          echo "Generated application:"
-          echo "$APP_PATH"
+          echo \
+            "EngineSim app: $APP_PATH"
 
 
-      - name: Inspect application bundle
+      - name: Inspect executable
         run: |
           APP_PATH="$(
-            find build/ios-app \
+            find build/ios-sdl \
               -type d \
-              -name "EngineSim.app" \
+              -name 'EngineSim.app' \
               | head -n 1
           )"
 
           EXECUTABLE="$APP_PATH/EngineSim"
 
-          echo "================================"
-          echo "Application bundle"
-          echo "================================"
+          echo \
+            "================================"
 
-          ls -la "$APP_PATH"
+          echo \
+            "Executable"
 
-          echo
-          echo "================================"
-          echo "Executable"
-          echo "================================"
+          echo \
+            "================================"
 
-          file "$EXECUTABLE"
-
-          echo
-          echo "================================"
-          echo "Architectures"
-          echo "================================"
-
-          lipo -info "$EXECUTABLE"
+          file \
+            "$EXECUTABLE"
 
           echo
-          echo "================================"
-          echo "Bundle identifier"
-          echo "================================"
 
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" \
-            "$APP_PATH/Info.plist"
+          lipo \
+            -info \
+            "$EXECUTABLE"
 
           echo
-          echo "================================"
-          echo "Minimum iOS version"
-          echo "================================"
+          echo \
+            "================================"
 
-          /usr/libexec/PlistBuddy \
-            -c "Print :MinimumOSVersion" \
-            "$APP_PATH/Info.plist"
+          echo \
+            "Bundle"
+
+          echo \
+            "================================"
+
+          ls \
+            -lah \
+            "$APP_PATH"
 
 
-      - name: Validate arm64 iPhone executable
+      - name: Inspect SDL linkage
         run: |
           APP_PATH="$(
-            find build/ios-app \
+            find build/ios-sdl \
               -type d \
-              -name "EngineSim.app" \
+              -name 'EngineSim.app' \
               | head -n 1
           )"
 
           EXECUTABLE="$APP_PATH/EngineSim"
 
-          if [ ! -f "$EXECUTABLE" ]; then
-            echo "ERROR: EngineSim executable does not exist."
-            exit 1
-          fi
+          echo \
+            "Looking for SDL symbols..."
 
-          ARCH_INFO="$(lipo -info "$EXECUTABLE")"
-
-          echo "$ARCH_INFO"
-
-          if ! echo "$ARCH_INFO" | grep -q "arm64"; then
-            echo
-            echo "ERROR:"
-            echo "EngineSim executable is not arm64."
-
-            exit 1
-          fi
-
-          echo
-          echo "SUCCESS:"
-          echo "Native EngineSim iOS application compiled for arm64."
-
-
-      - name: Verify EngineSim core linkage
-        run: |
-          echo "Searching Xcode link command for EngineSim core..."
-
-          grep \
-            -R \
-            "engine-sim-core" \
-            build/ios-app \
-            --include="*.LinkFileList" \
-            --include="*.xcbuilddata" \
-            --include="*.txt" \
-            --include="*.pbxproj" \
-            2>/dev/null \
-            | head -n 30 \
+          nm \
+            "$EXECUTABLE" \
+            | grep \
+                -E \
+                'SDL_(Init|CreateWindow|CreateRenderer|RenderPresent)' \
+            | head -n 40 \
             || true
 
-          echo
-          echo "EngineSimIOS explicitly links engine-sim::core through CMake."
 
-
-      - name: Package unsigned iOS app
+      - name: Verify visualization build
         run: |
-          rm -rf artifacts
+          echo \
+            "Searching for visualization library..."
 
-          mkdir -p artifacts/Payload
+          find build/ios-sdl \
+            -type f \
+            -name 'libengine-sim-visualization.a' \
+            -print
 
-          APP_PATH="$(
-            find build/ios-app \
-              -type d \
-              -name "EngineSim.app" \
+          VIS_LIBRARY="$(
+            find build/ios-sdl \
+              -type f \
+              -name 'libengine-sim-visualization.a' \
               | head -n 1
           )"
 
-          cp -R \
+          if [ -z "$VIS_LIBRARY" ]; then
+
+            echo \
+              "ERROR: visualization library was not built."
+
+            exit 1
+
+          fi
+
+          echo
+          echo \
+            "Visualization architecture:"
+
+          lipo \
+            -info \
+            "$VIS_LIBRARY"
+
+
+      - name: Create IPA payload
+        run: |
+          rm \
+            -rf \
+            artifacts
+
+          mkdir \
+            -p \
+            artifacts/Payload
+
+          APP_PATH="$(
+            find build/ios-sdl \
+              -type d \
+              -name 'EngineSim.app' \
+              | head -n 1
+          )"
+
+          cp \
+            -R \
             "$APP_PATH" \
             artifacts/Payload/
 
-          cat > artifacts/BUILD_INFO.txt <<EOF
+          cat \
+            > artifacts/BUILD_INFO.txt \
+            <<'EOF'
+
           EngineSim iOS
           =============
 
           Milestone:
-          First native iOS application bundle
+          SDL3 native graphics host
 
           Platform:
           iPhoneOS
@@ -269,48 +282,57 @@ jobs:
           Architecture:
           arm64
 
-          Configuration:
-          Release
-
-          EngineSim core:
-          linked
-
-          UIKit host:
+          SDL3:
           enabled
 
-          SDL:
+          SDL iOS lifecycle:
+          enabled
+
+          SDL graphics:
+          enabled
+
+          Touch input:
+          enabled
+
+          EngineSim core:
+          compiled for iOS
+
+          EngineSim visualization:
+          compiled for iOS
+
+          EngineSim real GPU renderer:
+          next milestone
+
+          EngineSim simulation connection:
+          next milestone
+
+          Audio:
           not yet enabled
 
-          EngineSim renderer:
-          not yet enabled
-
-          EngineSim scripting:
-          not yet enabled
-
-          EngineSim audio output:
-          not yet enabled
-
-          Code signing:
+          Signing:
           disabled
 
-          Expected launch result:
-          Native EngineSim milestone screen
+          Expected on-device result:
+          EngineSim-style SDL dashboard
+          with animated tachometer and
+          touch-controlled throttle.
           EOF
 
-          cd artifacts
+          cd \
+            artifacts
 
           zip \
             -r \
-            EngineSim-iOS-unsigned.ipa \
+            EngineSim-SDL3-iOS-unsigned.ipa \
             Payload \
             BUILD_INFO.txt
 
 
-      - name: Upload unsigned IPA
+      - name: Upload SDL3 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: engine-sim-ios-app-arm64
+          name: engine-sim-ios-sdl3-arm64
           path: |
-            artifacts/EngineSim-iOS-unsigned.ipa
+            artifacts/EngineSim-SDL3-iOS-unsigned.ipa
             artifacts/BUILD_INFO.txt
           if-no-files-found: error
