@@ -2,28 +2,47 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     EngineSimIOSHost
-    VERSION 0.1.0
-    LANGUAGES CXX OBJCXX
+    VERSION 0.2.0
+    LANGUAGES
+        C
+        CXX
+        OBJC
+        OBJCXX
 )
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(
+    CMAKE_CXX_STANDARD
+    17
+)
+
+set(
+    CMAKE_CXX_STANDARD_REQUIRED
+    ON
+)
+
+set(
+    CMAKE_CXX_EXTENSIONS
+    OFF
+)
 
 if(NOT IOS)
-    message(FATAL_ERROR "EngineSimIOSHost must be built for iOS.")
+    message(
+        FATAL_ERROR
+        "EngineSimIOSHost must be built for iOS."
+    )
 endif()
 
 #
-# Configure the parent EngineSim project for a core-only build.
-#
-# We deliberately leave desktop, web, scripting, tests and SDL disabled
-# during this milestone. The purpose of this target is to prove that an
-# actual UIKit application can link against EngineSim and become an iOS
-# .app bundle.
+# EngineSim configuration
 #
 
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(
+    BUILD_TESTING
+    OFF
+    CACHE BOOL
+    ""
+    FORCE
+)
 
 set(
     ENGINE_SIM_BUILD_DESKTOP
@@ -49,9 +68,13 @@ set(
     FORCE
 )
 
+#
+# SDL is now enabled.
+#
+
 set(
     ENGINE_SIM_FETCH_SDL3
-    OFF
+    ON
     CACHE BOOL
     ""
     FORCE
@@ -66,9 +89,7 @@ set(
 )
 
 #
-# Bring the EngineSim source tree into this iOS host project.
-#
-# The parent directory is the engine-sim-ios repository root.
+# Bring EngineSim libraries into the iOS build.
 #
 
 add_subdirectory(
@@ -78,13 +99,27 @@ add_subdirectory(
 )
 
 #
-# Native iOS application.
+# Pull the exact SDL3 version already selected by
+# the EngineSim project.
+#
+
+include(
+    "${CMAKE_CURRENT_LIST_DIR}/../cmake/EngineSimSDL.cmake"
+)
+
+engine_sim_require_sdl3()
+
+#
+# Native SDL3 iOS application.
+#
+# SDL_MAIN_USE_CALLBACKS lets SDL own the UIKit
+# lifecycle, which is the cleanest path on iOS.
 #
 
 add_executable(
     EngineSimIOS
     MACOSX_BUNDLE
-    main.mm
+    main.cpp
 )
 
 target_compile_features(
@@ -93,31 +128,64 @@ target_compile_features(
     cxx_std_17
 )
 
+target_compile_definitions(
+    EngineSimIOS
+    PRIVATE
+    ENGINE_SIM_IOS=1
+)
+
 #
-# The important part of this milestone:
+# Force the visualization library through the iOS
+# compiler during this build.
 #
-# The UIKit application executable is linked directly against the native
-# arm64 EngineSim simulation library that we already proved can compile for
-# iPhoneOS.
+# Even though the temporary SDL dashboard does not
+# call it yet, this catches visualization portability
+# failures NOW instead of several milestones later.
 #
+
+add_dependencies(
+    EngineSimIOS
+    engine-sim-visualization
+)
 
 target_link_libraries(
     EngineSimIOS
     PRIVATE
+
+    SDL3::SDL3
+
     engine-sim::core
+
     "-framework UIKit"
     "-framework Foundation"
+    "-framework CoreGraphics"
+    "-framework QuartzCore"
+    "-framework Metal"
+    "-framework GameController"
+    "-framework AudioToolbox"
+    "-framework AVFoundation"
 )
+
+#
+# Some SDL configurations expose the main shim as a
+# separate CMake target.
+#
+
+if(TARGET SDL3::SDL3main)
+
+    target_link_libraries(
+        EngineSimIOS
+        PRIVATE
+        SDL3::SDL3main
+    )
+
+endif()
 
 target_include_directories(
     EngineSimIOS
     PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../include"
 )
-
-#
-# Bundle configuration.
-#
 
 set_target_properties(
     EngineSimIOS
@@ -161,14 +229,4 @@ set_target_properties(
 
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC
     "YES"
-)
-
-#
-# Useful compile-time marker for everything we add to the native host later.
-#
-
-target_compile_definitions(
-    EngineSimIOS
-    PRIVATE
-    ENGINE_SIM_IOS=1
 )
