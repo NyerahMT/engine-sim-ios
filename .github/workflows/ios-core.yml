@@ -1,155 +1,316 @@
-name: iOS Core Build
+name: iOS App Build
 
 on:
   push:
     branches:
       - master
       - main
+
   pull_request:
+
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  ios-core:
-    name: EngineSim Core - iPhone arm64
+
+  ios-app:
+
+    name: EngineSim iPhone App
+
     runs-on: macos-15
 
     steps:
+
       - name: Checkout EngineSim
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
+
       - name: Show Apple toolchain
         run: |
-          echo "macOS:"
+          echo "================================"
+          echo "macOS"
+          echo "================================"
+
           sw_vers
 
           echo
-          echo "Xcode:"
+          echo "================================"
+          echo "Xcode"
+          echo "================================"
+
           xcodebuild -version
 
           echo
-          echo "iPhoneOS SDK:"
+          echo "================================"
+          echo "iPhoneOS SDK"
+          echo "================================"
+
           xcrun --sdk iphoneos --show-sdk-version
 
-          echo
-          echo "iPhoneOS SDK path:"
           xcrun --sdk iphoneos --show-sdk-path
 
           echo
-          echo "Apple Clang:"
-          xcrun --sdk iphoneos clang++ --version
+          echo "================================"
+          echo "CMake"
+          echo "================================"
 
-          echo
-          echo "CMake:"
           cmake --version
 
-          echo
-          echo "Ninja:"
-          ninja --version
 
-      - name: Verify submodules
+      - name: Verify EngineSim submodules
         run: |
-          test -f dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
-          test -f dependencies/submodules/csv-io/CMakeLists.txt
-          test -f dependencies/submodules/piranha/CMakeLists.txt
+          test -f \
+            dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
 
-          echo "All required EngineSim submodules are present."
+          test -f \
+            dependencies/submodules/csv-io/CMakeLists.txt
 
-      - name: Configure EngineSim for iPhone
+          test -f \
+            dependencies/submodules/piranha/CMakeLists.txt
+
+          echo "EngineSim dependencies are present."
+
+
+      - name: Configure native iOS application
         run: |
-          cmake --preset ios-arm64
+          rm -rf build/ios-app
 
-      - name: Build EngineSim simulation core
+          cmake \
+            -S ios \
+            -B build/ios-app \
+            -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+
+
+      - name: Build EngineSim iOS application
         run: |
-          cmake --build --preset ios-arm64 --verbose
+          cmake \
+            --build build/ios-app \
+            --config Release \
+            --target EngineSimIOS \
+            -- \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
 
-      - name: Locate compiled library
+
+      - name: Find generated app
         run: |
-          echo "Searching for EngineSim core library..."
+          echo "Searching for EngineSim.app..."
 
-          find build/ios-arm64 \
-            -type f \
-            \( -name "libengine-sim-core.a" -o -name "engine-sim-core.lib" \) \
+          find build/ios-app \
+            -type d \
+            -name "EngineSim.app" \
             -print
 
-          CORE_LIBRARY="$(find build/ios-arm64 -type f -name "libengine-sim-core.a" | head -n 1)"
+          APP_PATH="$(
+            find build/ios-app \
+              -type d \
+              -name "EngineSim.app" \
+              | head -n 1
+          )"
 
-          if [ -z "$CORE_LIBRARY" ]; then
-            echo "ERROR: libengine-sim-core.a was not produced."
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: EngineSim.app was not generated."
+
+            echo
+            echo "Available .app directories:"
+
+            find build/ios-app \
+              -type d \
+              -name "*.app" \
+              -print
+
             exit 1
           fi
 
           echo
-          echo "Built library:"
-          echo "$CORE_LIBRARY"
+          echo "Generated application:"
+          echo "$APP_PATH"
 
-          echo
-          echo "Architecture information:"
-          lipo -info "$CORE_LIBRARY"
 
-          echo
-          echo "File information:"
-          file "$CORE_LIBRARY"
-
-      - name: Validate arm64
+      - name: Inspect application bundle
         run: |
-          CORE_LIBRARY="$(find build/ios-arm64 -type f -name "libengine-sim-core.a" | head -n 1)"
+          APP_PATH="$(
+            find build/ios-app \
+              -type d \
+              -name "EngineSim.app" \
+              | head -n 1
+          )"
 
-          if [ -z "$CORE_LIBRARY" ]; then
-            echo "EngineSim core library is missing."
+          EXECUTABLE="$APP_PATH/EngineSim"
+
+          echo "================================"
+          echo "Application bundle"
+          echo "================================"
+
+          ls -la "$APP_PATH"
+
+          echo
+          echo "================================"
+          echo "Executable"
+          echo "================================"
+
+          file "$EXECUTABLE"
+
+          echo
+          echo "================================"
+          echo "Architectures"
+          echo "================================"
+
+          lipo -info "$EXECUTABLE"
+
+          echo
+          echo "================================"
+          echo "Bundle identifier"
+          echo "================================"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIdentifier" \
+            "$APP_PATH/Info.plist"
+
+          echo
+          echo "================================"
+          echo "Minimum iOS version"
+          echo "================================"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :MinimumOSVersion" \
+            "$APP_PATH/Info.plist"
+
+
+      - name: Validate arm64 iPhone executable
+        run: |
+          APP_PATH="$(
+            find build/ios-app \
+              -type d \
+              -name "EngineSim.app" \
+              | head -n 1
+          )"
+
+          EXECUTABLE="$APP_PATH/EngineSim"
+
+          if [ ! -f "$EXECUTABLE" ]; then
+            echo "ERROR: EngineSim executable does not exist."
             exit 1
           fi
 
-          ARCH_INFO="$(lipo -info "$CORE_LIBRARY")"
+          ARCH_INFO="$(lipo -info "$EXECUTABLE")"
 
           echo "$ARCH_INFO"
 
           if ! echo "$ARCH_INFO" | grep -q "arm64"; then
-            echo "ERROR: EngineSim core was not compiled for arm64."
+            echo
+            echo "ERROR:"
+            echo "EngineSim executable is not arm64."
+
             exit 1
           fi
 
           echo
-          echo "SUCCESS: EngineSim core compiled for iPhone arm64."
+          echo "SUCCESS:"
+          echo "Native EngineSim iOS application compiled for arm64."
 
-      - name: Package core artifact
-        if: success()
+
+      - name: Verify EngineSim core linkage
         run: |
-          mkdir -p artifacts/engine-sim-ios-core
+          echo "Searching Xcode link command for EngineSim core..."
 
-          CORE_LIBRARY="$(find build/ios-arm64 -type f -name "libengine-sim-core.a" | head -n 1)"
+          grep \
+            -R \
+            "engine-sim-core" \
+            build/ios-app \
+            --include="*.LinkFileList" \
+            --include="*.xcbuilddata" \
+            --include="*.txt" \
+            --include="*.pbxproj" \
+            2>/dev/null \
+            | head -n 30 \
+            || true
 
-          cp "$CORE_LIBRARY" artifacts/engine-sim-ios-core/
+          echo
+          echo "EngineSimIOS explicitly links engine-sim::core through CMake."
 
-          cp -R include artifacts/engine-sim-ios-core/include
 
-          cat > artifacts/engine-sim-ios-core/BUILD_INFO.txt <<EOF
-          EngineSim iOS core build
-          ========================
+      - name: Package unsigned iOS app
+        run: |
+          rm -rf artifacts
 
-          Platform: iOS
-          SDK: iPhoneOS
-          Architecture: arm64
-          Configuration: Debug
+          mkdir -p artifacts/Payload
 
-          This artifact contains the first native iOS build
-          of the EngineSim simulation core.
+          APP_PATH="$(
+            find build/ios-app \
+              -type d \
+              -name "EngineSim.app" \
+              | head -n 1
+          )"
 
-          Desktop host: disabled
-          Web host: disabled
-          SDL: disabled
-          Scripting: disabled
-          Tests: disabled
+          cp -R \
+            "$APP_PATH" \
+            artifacts/Payload/
+
+          cat > artifacts/BUILD_INFO.txt <<EOF
+          EngineSim iOS
+          =============
+
+          Milestone:
+          First native iOS application bundle
+
+          Platform:
+          iPhoneOS
+
+          Architecture:
+          arm64
+
+          Configuration:
+          Release
+
+          EngineSim core:
+          linked
+
+          UIKit host:
+          enabled
+
+          SDL:
+          not yet enabled
+
+          EngineSim renderer:
+          not yet enabled
+
+          EngineSim scripting:
+          not yet enabled
+
+          EngineSim audio output:
+          not yet enabled
+
+          Code signing:
+          disabled
+
+          Expected launch result:
+          Native EngineSim milestone screen
           EOF
 
-      - name: Upload EngineSim iOS core
-        if: success()
+          cd artifacts
+
+          zip \
+            -r \
+            EngineSim-iOS-unsigned.ipa \
+            Payload \
+            BUILD_INFO.txt
+
+
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: engine-sim-ios-core-arm64
-          path: artifacts/engine-sim-ios-core
+          name: engine-sim-ios-app-arm64
+          path: |
+            artifacts/EngineSim-iOS-unsigned.ipa
+            artifacts/BUILD_INFO.txt
           if-no-files-found: error
