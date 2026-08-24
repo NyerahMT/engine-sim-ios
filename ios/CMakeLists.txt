@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     EngineSimIOSHost
-    VERSION 0.2.0
+    VERSION 0.3.0
     LANGUAGES
         C
         CXX
@@ -68,10 +68,6 @@ set(
     FORCE
 )
 
-#
-# SDL is now enabled.
-#
-
 set(
     ENGINE_SIM_FETCH_SDL3
     ON
@@ -99,8 +95,7 @@ add_subdirectory(
 )
 
 #
-# Pull the exact SDL3 version already selected by
-# the EngineSim project.
+# SDL3
 #
 
 include(
@@ -110,16 +105,25 @@ include(
 engine_sim_require_sdl3()
 
 #
-# Native SDL3 iOS application.
+# iOS asset catalog
 #
-# SDL_MAIN_USE_CALLBACKS lets SDL own the UIKit
-# lifecycle, which is the cleanest path on iOS.
+
+set(
+    ENGINE_SIM_IOS_ASSET_CATALOG
+    "${CMAKE_CURRENT_LIST_DIR}/Assets.xcassets"
+)
+
+#
+# Native SDL3 iOS application.
 #
 
 add_executable(
     EngineSimIOS
     MACOSX_BUNDLE
+
     main.cpp
+
+    "${ENGINE_SIM_IOS_ASSET_CATALOG}"
 )
 
 target_compile_features(
@@ -135,12 +139,8 @@ target_compile_definitions(
 )
 
 #
-# Force the visualization library through the iOS
-# compiler during this build.
-#
-# Even though the temporary SDL dashboard does not
-# call it yet, this catches visualization portability
-# failures NOW instead of several milestones later.
+# Force EngineSim visualization through the
+# iPhone compiler.
 #
 
 add_dependencies(
@@ -166,11 +166,6 @@ target_link_libraries(
     "-framework AVFoundation"
 )
 
-#
-# Some SDL configurations expose the main shim as a
-# separate CMake target.
-#
-
 if(TARGET SDL3::SDL3main)
 
     target_link_libraries(
@@ -186,6 +181,10 @@ target_include_directories(
     PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../include"
 )
+
+#
+# App bundle settings.
+#
 
 set_target_properties(
     EngineSimIOS
@@ -229,4 +228,20 @@ set_target_properties(
 
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC
     "YES"
+
+    #
+    # Tell Xcode which asset catalog entry is
+    # the application's Home Screen icon.
+    #
+
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME
+    "AppIcon"
+
+    #
+    # Make sure the asset catalog participates
+    # in the iOS bundle build.
+    #
+
+    RESOURCE
+    "${ENGINE_SIM_IOS_ASSET_CATALOG}"
 )
