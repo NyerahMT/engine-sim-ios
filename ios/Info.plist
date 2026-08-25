@@ -42,88 +42,11 @@
     <string>15.0</string>
 
     <!--
-        Expose the app's Documents directory in the iOS Files app.
-
-        This gives users:
-        Files
-          > On My iPhone
-            > Engine Simulator
-              > Custom Engines
+        Permit iPhones with ProMotion displays to schedule frames
+        above the traditional 60 Hz minimum-frame-duration limit.
     -->
-    <key>UIFileSharingEnabled</key>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
-
-    <!--
-        Allow Files to edit/manage documents in place rather than
-        requiring every document to be copied into a temporary area.
-    -->
-    <key>LSSupportsOpeningDocumentsInPlace</key>
-    <true/>
-
-    <!--
-        Tell iOS that Engine Simulator understands .mr files.
-        This also gives Safari/Files/Discord a chance to offer
-        Engine Simulator in document actions.
-    -->
-    <key>CFBundleDocumentTypes</key>
-    <array>
-
-        <dict>
-
-            <key>CFBundleTypeName</key>
-            <string>Engine Simulator Engine Script</string>
-
-            <key>CFBundleTypeRole</key>
-            <string>Editor</string>
-
-            <key>LSHandlerRank</key>
-            <string>Owner</string>
-
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>com.nyeraht.engine-simulator.mr</string>
-            </array>
-
-        </dict>
-
-    </array>
-
-    <!--
-        Define the custom .mr extension for iOS.
-    -->
-    <key>UTExportedTypeDeclarations</key>
-    <array>
-
-        <dict>
-
-            <key>UTTypeIdentifier</key>
-            <string>com.nyeraht.engine-simulator.mr</string>
-
-            <key>UTTypeDescription</key>
-            <string>Engine Simulator Engine Script</string>
-
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.source-code</string>
-                <string>public.plain-text</string>
-            </array>
-
-            <key>UTTypeTagSpecification</key>
-            <dict>
-
-                <key>public.filename-extension</key>
-                <array>
-                    <string>mr</string>
-                </array>
-
-                <key>public.mime-type</key>
-                <string>text/plain</string>
-
-            </dict>
-
-        </dict>
-
-    </array>
 
     <key>UILaunchScreen</key>
     <dict>
