@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     EngineSimIOSHost
-    VERSION 0.3.0
+    VERSION 0.3.1
     LANGUAGES
         C
         CXX
@@ -111,6 +111,22 @@ engine_sim_require_sdl3()
 set(
     ENGINE_SIM_IOS_ASSET_CATALOG
     "${CMAKE_CURRENT_LIST_DIR}/Assets.xcassets"
+)
+
+#
+# This is the important fix:
+#
+# Tell CMake that the .xcassets directory is an iOS bundle resource.
+# With the Xcode generator, this places it into the Resources build phase,
+# which causes Xcode's asset compiler (actool) to generate Assets.car.
+#
+
+set_source_files_properties(
+    "${ENGINE_SIM_IOS_ASSET_CATALOG}"
+    PROPERTIES
+
+    MACOSX_PACKAGE_LOCATION
+    "Resources"
 )
 
 #
@@ -230,18 +246,17 @@ set_target_properties(
     "YES"
 
     #
-    # Tell Xcode which asset catalog entry is
-    # the application's Home Screen icon.
+    # Tell Xcode which icon set in Assets.xcassets
+    # is the application's app icon.
     #
 
     XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME
     "AppIcon"
 
     #
-    # Make sure the asset catalog participates
-    # in the iOS bundle build.
+    # Include all device icon variants required by the target.
     #
 
-    RESOURCE
-    "${ENGINE_SIM_IOS_ASSET_CATALOG}"
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS
+    "YES"
 )
