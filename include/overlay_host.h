@@ -15,6 +15,7 @@ public:
     };
 
     void initialize(EngineSimApplication *app) override;
+    void destroy() override;
     void update(float dt) override;
     void render() override;
     void signal(UiElement *element, Event event) override;
@@ -31,13 +32,17 @@ private:
     UiButton *m_issuesButton = nullptr;
     UiButton *m_pickerScrollUpButton = nullptr;
     UiButton *m_pickerScrollDownButton = nullptr;
+
+    // Non-owning pointers. UiElement owns the actual button objects.
     std::vector<UiButton *> m_engineButtons;
+
     Kind m_kind = Kind::None;
     float m_pickerScrollOffset = 0.0f;
     float m_pickerMaxScrollOffset = 0.0f;
 
     Bounds viewportBounds() const;
     Bounds dialogBounds() const;
+
     void layoutControls(const Bounds &panel);
     void layoutEnginePicker(const Bounds &panel);
     void setChildrenVisible();
