@@ -4,11 +4,13 @@
 #include "vehicle.h"
 #include "engine.h"
 #include "scs.h"
+#include "engine_sim_clutch_constraint.h"
 
 class Transmission {
 public:
     struct Parameters {
-        int GearCount = 0;
+        int GearCount =
+            0;
 
         const double *GearRatios =
             nullptr;
@@ -26,10 +28,10 @@ public:
             false;
 
         double ClutchStiffness =
-            0.0;
+            10.0;
 
         double ClutchDamping =
-            0.0;
+            1.0;
     };
 
 public:
@@ -39,7 +41,8 @@ public:
     void initialize(
         const Parameters &params);
 
-    void update(double dt);
+    void update(
+        double dt);
 
     void addToSystem(
         atg_scs::RigidBodySystem *system,
@@ -60,8 +63,7 @@ public:
         if (pressure < 0.0) {
             pressure = 0.0;
         }
-
-        if (pressure > 1.0) {
+        else if (pressure > 1.0) {
             pressure = 1.0;
         }
 
@@ -81,6 +83,12 @@ public:
         return m_maxClutchFlex;
     }
 
+    inline bool
+    getLimitClutchFlex() const
+    {
+        return m_limitClutchFlex;
+    }
+
     inline double
     getClutchStiffness() const
     {
@@ -93,14 +101,24 @@ public:
         return m_clutchDamping;
     }
 
+    inline double
+    getClutchFlex() const
+    {
+        return
+            m_clutchConstraint
+                .getFlex();
+    }
+
 protected:
-    atg_scs::ClutchConstraint
+    EngineSimClutchConstraint
         m_clutchConstraint;
 
     atg_scs::RigidBody
         *m_rotatingMass;
 
     Vehicle *m_vehicle;
+
+    Engine *m_engine;
 
     int m_gear;
     int m_newGear;
@@ -113,8 +131,11 @@ protected:
 
     double m_maxClutchFlex;
     bool m_limitClutchFlex;
+
     double m_clutchStiffness;
     double m_clutchDamping;
+
+    bool m_clutchWasEngaged;
 };
 
 #endif
