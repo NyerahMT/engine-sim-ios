@@ -5,9 +5,6 @@ on:
     branches:
       - master
       - main
-
-  pull_request:
-
   workflow_dispatch:
 
 permissions:
@@ -18,36 +15,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
   ios:
-
-    name: EngineSim iPhone
-
+    name: EngineSim iPhone App Store
     runs-on: macos-15
 
     env:
       BUILD_DIR: build/ios
       FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
+      BUNDLE_ID: com.nyerahmt.enginesimulator
+      MARKETING_VERSION: 0.1.0
 
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
 
     steps:
-
-      # ============================================================
-      # Source
-      # ============================================================
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 1
-
-
-      # ============================================================
-      # Dependency cache
-      # ============================================================
 
       - name: Cache SDL3 FetchContent
         uses: actions/cache@v4
@@ -58,36 +44,12 @@ jobs:
             enginesim-ios-fetchcontent-v2-
             enginesim-ios-fetchcontent-
 
-
-      # ============================================================
-      # Incremental Xcode / CMake cache
-      #
-      # IMPORTANT:
-      #
-      # Each commit gets a new cache key, but restore-keys pulls the
-      # newest compatible build from the previous successful commit.
-      #
-      # This means:
-      #
-      #   edit sdl_audio_output.cpp
-      #          ↓
-      #   restore previous EngineSim build
-      #          ↓
-      #   compile sdl_audio_output.cpp
-      #          ↓
-      #   relink
-      #          ↓
-      #   IPA
-      #
-      # instead of recompiling the whole project.
-      # ============================================================
-
       - name: Cache incremental iOS build
         uses: actions/cache@v4
         with:
           path: build/ios
           key: >-
-            enginesim-ios-release-v4-
+            enginesim-ios-appstore-v1-
             ${{ hashFiles(
               'CMakeLists.txt',
               'ios/CMakeLists.txt',
@@ -95,15 +57,9 @@ jobs:
               '.gitmodules'
             ) }}-
             ${{ github.sha }}
-
           restore-keys: |
-            enginesim-ios-release-v4-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
-            enginesim-ios-release-v4-
-
-
-      # ============================================================
-      # Build tools
-      # ============================================================
+            enginesim-ios-appstore-v1-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
+            enginesim-ios-appstore-v1-
 
       - name: Prepare script compiler tools
         run: |
@@ -118,16 +74,8 @@ jobs:
           echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
           echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
 
-          echo "Bison:"
           /opt/homebrew/opt/bison/bin/bison --version | head -n 1
-
-          echo "Flex:"
           /opt/homebrew/opt/flex/bin/flex --version
-
-
-      # ============================================================
-      # Sanity check
-      # ============================================================
 
       - name: Sanity check
         run: |
@@ -138,24 +86,11 @@ jobs:
           test -f assets/main.mr
           test -f assets/fonts/slkscr.ttf
           test -f assets/authored_meshes.obj
-
           test -f assets/shaders/engine_sim.vertex.msl
           test -f assets/shaders/engine_sim.fragment.msl
-
           test -f ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 
           echo "EngineSim source tree ready."
-
-
-      # ============================================================
-      # Configure
-      #
-      # DO NOT DELETE BUILD_DIR.
-      #
-      # CMake is intentionally run over the restored build tree.
-      # It will update the Xcode project if necessary while keeping
-      # valid object files from the previous build.
-      # ============================================================
 
       - name: Configure incremental iOS build
         run: |
@@ -175,18 +110,9 @@ jobs:
             -DENGINE_SIM_BUILD_SCRIPTING=ON \
             -DBUILD_SHARED_LIBS=OFF
 
-
-      # ============================================================
-      # Release build
-      #
-      # Let the runner use all available CPU cores.
-      # ============================================================
-
-      - name: Build Release incrementally
+      - name: Build unsigned Release
         run: |
           JOBS="$(sysctl -n hw.ncpu)"
-
-          echo "Building with $JOBS parallel jobs."
 
           cmake \
             --build "$BUILD_DIR" \
@@ -196,11 +122,6 @@ jobs:
             -- \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
-
-
-      # ============================================================
-      # Locate app
-      # ============================================================
 
       - name: Locate app
         run: |
@@ -227,26 +148,211 @@ jobs:
           fi
 
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "EngineSim.app: $APP_PATH"
 
-          echo "EngineSim.app:"
-          echo "$APP_PATH"
-
-
-      # ============================================================
-      # Lightweight validation
-      #
-      # We don't need to repeatedly crawl the entire build tree
-      # and run nm against the whole executable on every iteration.
-      # The build/link succeeding already proves most of that.
-      # ============================================================
-
-      - name: Validate iPhone build
+      - name: Apply App Store bundle identity
         run: |
+          INFO_PLIST="$APP_PATH/Info.plist"
+
+          test -f "$INFO_PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleIdentifier $BUNDLE_ID" \
+            "$INFO_PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleShortVersionString $MARKETING_VERSION" \
+            "$INFO_PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" \
+            "$INFO_PLIST"
+
+          echo "Bundle ID:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
+
+          echo "Version:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST"
+
+          echo "Build:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST"
+
+      - name: Install Apple signing identity
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/distribution.p12"
+          PROFILE_PATH="$RUNNER_TEMP/EngineSim.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          ENTITLEMENTS_PATH="$RUNNER_TEMP/entitlements.plist"
+          KEYCHAIN_PATH="$RUNNER_TEMP/engine-sim-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" \
+            | base64 --decode \
+            > "$CERTIFICATE_PATH"
+
+          printf '%s' "$BUILD_PROVISION_PROFILE_BASE64" \
+            | base64 --decode \
+            > "$PROFILE_PATH"
+
+          security create-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security set-keychain-settings \
+            -lut 21600 \
+            "$KEYCHAIN_PATH"
+
+          security unlock-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security import \
+            "$CERTIFICATE_PATH" \
+            -P "$P12_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security list-keychains \
+            -d user \
+            -s "$KEYCHAIN_PATH"
+
+          security cms \
+            -D \
+            -i "$PROFILE_PATH" \
+            > "$PROFILE_PLIST"
+
+          PROFILE_UUID="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :UUID" \
+              "$PROFILE_PLIST"
+          )"
+
+          PROFILE_NAME="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Name" \
+              "$PROFILE_PLIST"
+          )"
+
+          PROFILE_APP_ID="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Entitlements:application-identifier" \
+              "$PROFILE_PLIST"
+          )"
+
+          EXPECTED_SUFFIX=".$BUNDLE_ID"
+
+          if [[ "$PROFILE_APP_ID" != *"$EXPECTED_SUFFIX" ]]; then
+            echo "ERROR: Provisioning profile application identifier is:"
+            echo "$PROFILE_APP_ID"
+            echo "Expected it to end with:"
+            echo "$EXPECTED_SUFFIX"
+            exit 1
+          fi
+
+          mkdir -p \
+            "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          cp \
+            "$PROFILE_PATH" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+          plutil \
+            -extract Entitlements \
+            xml1 \
+            -o "$ENTITLEMENTS_PATH" \
+            "$PROFILE_PLIST"
+
+          SIGNING_IDENTITY="$(
+            security find-identity \
+              -v \
+              -p codesigning \
+              "$KEYCHAIN_PATH" \
+              | awk -F '"' '/Apple Distribution/ {print $2; exit}'
+          )"
+
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "ERROR: Apple Distribution signing identity not found."
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
+
+          echo "Provisioning profile: $PROFILE_NAME"
+          echo "Profile UUID: $PROFILE_UUID"
+          echo "Application identifier: $PROFILE_APP_ID"
+          echo "Signing identity: $SIGNING_IDENTITY"
+
+          echo "PROFILE_PATH=$PROFILE_PATH" >> "$GITHUB_ENV"
+          echo "ENTITLEMENTS_PATH=$ENTITLEMENTS_PATH" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Sign Engine Simulator
+        run: |
+          set -euo pipefail
+
+          cp \
+            "$PROFILE_PATH" \
+            "$APP_PATH/embedded.mobileprovision"
+
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            find "$APP_PATH/Frameworks" \
+              -type d \
+              -name '*.framework' \
+              -print0 \
+              | while IFS= read -r -d '' FRAMEWORK; do
+                  echo "Signing framework: $FRAMEWORK"
+                  codesign \
+                    --force \
+                    --sign "$SIGNING_IDENTITY" \
+                    --keychain "$KEYCHAIN_PATH" \
+                    "$FRAMEWORK"
+                done
+
+            find "$APP_PATH/Frameworks" \
+              -type f \
+              -name '*.dylib' \
+              -print0 \
+              | while IFS= read -r -d '' DYLIB; do
+                  echo "Signing dylib: $DYLIB"
+                  codesign \
+                    --force \
+                    --sign "$SIGNING_IDENTITY" \
+                    --keychain "$KEYCHAIN_PATH" \
+                    "$DYLIB"
+                done
+          fi
+
+          codesign \
+            --force \
+            --sign "$SIGNING_IDENTITY" \
+            --keychain "$KEYCHAIN_PATH" \
+            --entitlements "$ENTITLEMENTS_PATH" \
+            --generate-entitlement-der \
+            "$APP_PATH"
+
+      - name: Verify signed app
+        run: |
+          set -euo pipefail
+
           EXECUTABLE="$APP_PATH/EngineSim"
 
           test -f "$EXECUTABLE"
+          test -f "$APP_PATH/embedded.mobileprovision"
 
-          echo "Executable:"
           file "$EXECUTABLE"
 
           ARCH="$(lipo -info "$EXECUTABLE")"
@@ -257,93 +363,60 @@ jobs:
             exit 1
           fi
 
-          test -f "$APP_PATH/assets/main.mr"
-          test -f "$APP_PATH/assets/fonts/slkscr.ttf"
-          test -f "$APP_PATH/assets/authored_meshes.obj"
-          test -f "$APP_PATH/assets/shaders/engine_sim.vertex.msl"
-          test -f "$APP_PATH/assets/shaders/engine_sim.fragment.msl"
+          FINAL_BUNDLE_ID="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleIdentifier" \
+              "$APP_PATH/Info.plist"
+          )"
+
+          if [ "$FINAL_BUNDLE_ID" != "$BUNDLE_ID" ]; then
+            echo "ERROR: Final bundle ID is $FINAL_BUNDLE_ID"
+            exit 1
+          fi
+
+          codesign \
+            --verify \
+            --deep \
+            --strict \
+            --verbose=2 \
+            "$APP_PATH"
 
           echo
-          echo "Release ARM64 EngineSim.app validated."
+          echo "Signing details:"
+          codesign \
+            -d \
+            --verbose=4 \
+            "$APP_PATH" \
+            2>&1 \
+            | grep -E 'Identifier=|TeamIdentifier=|Authority=' \
+            || true
 
+          echo
+          echo "Signed Engine Simulator validated."
 
-      # ============================================================
-      # IPA
-      # ============================================================
-
-      - name: Package IPA
+      - name: Package App Store IPA
         run: |
           rm -rf artifacts
-
           mkdir -p artifacts/Payload
 
           cp -R \
             "$APP_PATH" \
             artifacts/Payload/
 
-          cat > artifacts/BUILD_INFO.txt <<'EOF'
-          EngineSim iOS
-          =============
-
-          Platform:
-          iPhoneOS
-
-          Architecture:
-          arm64
-
-          Configuration:
-          Release
-
-          Build mode:
-          Incremental cached Release
-
-          Real EngineSim application:
-          enabled
-
-          EngineSim scripting:
-          enabled
-
-          EngineSim assets:
-          bundled
-
-          SDL GPU renderer:
-          enabled
-
-          Metal:
-          enabled
-
-          SDL audio:
-          enabled
-
-          Touch:
-          enabled
-
-          App icon:
-          enabled
-
-          Signing:
-          disabled
-          EOF
-
           cd artifacts
 
           zip \
-            -qr \
-            EngineSim-iOS-Release-unsigned.ipa \
-            Payload \
-            BUILD_INFO.txt
+            -qry \
+            EngineSim-iOS-AppStore.ipa \
+            Payload
 
+          echo "Created:"
+          ls -lh EngineSim-iOS-AppStore.ipa
 
-      # ============================================================
-      # Upload
-      # ============================================================
-
-      - name: Upload IPA
+      - name: Upload App Store IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: engine-sim-ios-release
-          path: |
-            artifacts/EngineSim-iOS-Release-unsigned.ipa
-            artifacts/BUILD_INFO.txt
+          name: engine-sim-ios-appstore
+          path: artifacts/EngineSim-iOS-AppStore.ipa
           if-no-files-found: error
           compression-level: 0
