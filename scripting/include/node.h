@@ -8,69 +8,200 @@
 
 namespace es_script {
 
-    class Node : public piranha::Node {
-    protected:
-        struct InputTarget {
-            enum class Type {
-                Object,
-                Atomic
-            };
-
-            piranha::pNodeInput *input = nullptr;
-            void *memoryTarget = nullptr;
-            Type type = Type::Atomic;
+class Node : public piranha::Node {
+protected:
+    struct InputTarget {
+        enum class Type {
+            Object,
+            Atomic
         };
 
-    public:
-        Node() {
-            /* void */
+        piranha::pNodeInput *input =
+            nullptr;
+
+        void *memoryTarget =
+            nullptr;
+
+        Type type =
+            Type::Atomic;
+    };
+
+public:
+    Node() {
+        /* void */
+    }
+
+    virtual ~Node() {
+        for (
+            auto &entry
+                : m_inputMap)
+        {
+            delete
+                entry.second.input;
+
+            entry.second.input =
+                nullptr;
         }
+    }
 
-        virtual ~Node() {
-            for (auto i : m_inputMap) {
-                delete i.second.input;
-            }
-        }
+    template <typename T_Out>
+    T_Out readAtomicInput(
+        const std::string &name)
+    {
+        T_Out out{};
 
-        template <typename T_Out>
-        T_Out readAtomicInput(const std::string &name) {
-            T_Out out;
-            (*m_inputMap[name].input)->fullCompute(&out);
+        auto it =
+            m_inputMap.find(
+                name);
 
+        if (
+            it
+            == m_inputMap.end())
+        {
             return out;
         }
 
-        void readAllInputs() {
-            for (auto i : m_inputMap) {
-                if (i.second.type == InputTarget::Type::Atomic
-                    || i.second.type == InputTarget::Type::Object)
-                {
-                    (*m_inputMap[i.first].input)->fullCompute(i.second.memoryTarget);
-                }
-            }
-        }
+        InputTarget &target =
+            it->second;
 
-        void addInput(
-            const std::string &name,
-            void *target,
-            InputTarget::Type type = InputTarget::Type::Atomic)
+        if (
+            target.input
+                == nullptr
+            || *target.input
+                == nullptr)
         {
-            m_inputMap[name] = {
-                new piranha::pNodeInput,
-                target,
-                type
-            };
+            return out;
         }
 
-        virtual void registerInputs() {
-            for (auto i : m_inputMap) {
-                registerInput(i.second.input, i.first);
+        (*target.input)
+            ->fullCompute(
+                &out);
+
+        return out;
+    }
+
+    void readAllInputs() {
+        for (
+            auto &entry
+                : m_inputMap)
+        {
+            InputTarget &target =
+                entry.second;
+
+            /*
+             * An EngineNode may expose a newer native input while an
+             * older .mr wrapper does not connect that input yet.
+             *
+             * Previously this became:
+             *
+             *     (*nullptr)->fullCompute(...)
+             *
+             * and caused an immediate EXC_BAD_ACCESS on launch.
+             *
+             * Leave the native parameter's initialized/default value
+             * untouched when there is no script-side connection.
+             */
+            if (
+                target.input
+                    == nullptr
+                || *target.input
+                    == nullptr)
+            {
+                continue;
+            }
+
+            if (
+                target.memoryTarget
+                == nullptr)
+            {
+                continue;
+            }
+
+            switch (
+                target.type)
+            {
+            case InputTarget::Type::Atomic:
+            case InputTarget::Type::Object:
+                (*target.input)
+                    ->fullCompute(
+                        target.memoryTarget);
+
+                break;
             }
         }
+    }
 
-    private:
-        std::map<std::string, InputTarget> m_inputMap;
-    };
+    void addInput(
+        const std::string &name,
+        void *target,
+        InputTarget::Type type =
+            InputTarget::Type::Atomic)
+    {
+        /*
+         * If a derived node accidentally registers the same input twice,
+         * clean up the old pNodeInput instead of leaking it.
+         */
+        auto existing =
+            m_inputMap.find(
+                name);
+
+        if (
+            existing
+            != m_inputMap.end())
+        {
+            delete
+                existing
+                    ->second
+                    .input;
+
+            existing
+                ->second
+                .input =
+                    nullptr;
+        }
+
+        InputTarget targetInfo;
+
+        targetInfo.input =
+            new piranha::pNodeInput;
+
+        targetInfo.memoryTarget =
+            target;
+
+        targetInfo.type =
+            type;
+
+        m_inputMap[name] =
+            targetInfo;
+    }
+
+    virtual void registerInputs() {
+        for (
+            auto &entry
+                : m_inputMap)
+        {
+            InputTarget &target =
+                entry.second;
+
+            if (
+                target.input
+                == nullptr)
+            {
+                continue;
+            }
+
+            registerInput(
+                target.input,
+                entry.first);
+        }
+    }
+
+private:
+    std::map<
+        std::string,
+        InputTarget>
+        m_inputMap;
+};
 
 } /* namespace es_script */
 
