@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     EngineSimIOSHost
-    VERSION 0.4.0
+    VERSION 0.4.1
     LANGUAGES
         C
         CXX
@@ -62,10 +62,6 @@ set(
     FORCE
 )
 
-#
-# REAL EngineSim engine loading requires Piranha scripting.
-#
-
 set(
     ENGINE_SIM_BUILD_SCRIPTING
     ON
@@ -100,6 +96,21 @@ add_subdirectory(
     "${CMAKE_CURRENT_LIST_DIR}/.."
     "${CMAKE_CURRENT_BINARY_DIR}/engine-sim"
     EXCLUDE_FROM_ALL
+)
+
+#
+# The visualization target contains EngineSimApplication::tick().
+#
+# Mark that target as iOS as well so it can select the
+# mobile-specific 60 FPS presentation cadence.
+#
+
+target_compile_definitions(
+    engine-sim-visualization
+
+    PRIVATE
+
+    ENGINE_SIM_IOS=1
 )
 
 #
@@ -242,23 +253,6 @@ endif()
 # ============================================================
 # Bundle assets
 # ============================================================
-#
-# RuntimePaths looks for an "assets" directory beside the
-# executable/bundle path.
-#
-# Copy the complete EngineSim asset tree after building:
-#
-# EngineSim.app/
-# ├── EngineSim
-# ├── Info.plist
-# ├── assets/
-# │   ├── main.mr
-# │   ├── engines/
-# │   ├── fonts/
-# │   ├── shaders/
-# │   ├── impulse_responses/
-# │   └── ...
-# └── ...
 #
 
 add_custom_command(
