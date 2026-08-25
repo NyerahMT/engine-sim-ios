@@ -5,75 +5,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <cstdlib>
-#include <fstream>
-#include <iomanip>
-#include <string>
 
 namespace {
-
-std::string audioDiagnosticsPath() {
-    const char *home = std::getenv("HOME");
-
-    if (home == nullptr || home[0] == '\0') {
-        return "engine_sim_audio_diagnostics.csv";
-    }
-
-    return std::string(home)
-        + "/Documents/engine_sim_audio_diagnostics.csv";
-}
-
-struct AudioDiagnosticLogger {
-    std::ofstream stream;
-    std::uint64_t sampleIndex = 0;
-
-    void ensureOpen() {
-        if (stream.is_open()) return;
-
-        stream.open(
-            audioDiagnosticsPath(),
-            std::ios::out | std::ios::trunc);
-
-        if (!stream.is_open()) return;
-
-        stream
-            << "sample_index"
-            << ",channel"
-            << ",input_transfer"
-            << ",jittered"
-            << ",dc_component"
-            << ",ac_component"
-            << ",derivative"
-            << ",noise_filtered"
-            << ",pre_convolution"
-            << ",post_convolution"
-            << ",signal_sum_pre_antialias"
-            << ",signal_post_antialias"
-            << ",leveler_gain"
-            << ",leveled"
-            << ",pcm"
-            << "\\n";
-
-        stream.flush();
-    }
-
-    bool shouldLog() {
-        ensureOpen();
-
-        const bool result =
-            (sampleIndex % 128ULL) == 0ULL;
-
-        ++sampleIndex;
-
-        return result && stream.is_open();
-    }
-};
-
-AudioDiagnosticLogger &audioDiagnosticLogger() {
-    static AudioDiagnosticLogger logger;
-    return logger;
-}
-
 float audioRandom(std::atomic<uint32_t> &state) {
     uint32_t value = state.load(std::memory_order_relaxed);
     uint32_t next;
@@ -503,37 +436,7 @@ int16_t Synthesizer::renderAudio(
     const float convAmount =
         parameters.convolution;
 
-    AudioDiagnosticLogger &diag =
-        audioDiagnosticLogger();
-
-    const bool logThisSample =
-        diag.shouldLog();
-
     float signal =
-        0.0f;
-
-    float diagInput =
-        0.0f;
-
-    float diagJittered =
-        0.0f;
-
-    float diagDc =
-        0.0f;
-
-    float diagAc =
-        0.0f;
-
-    float diagDerivative =
-        0.0f;
-
-    float diagNoiseFiltered =
-        0.0f;
-
-    float diagPreConv =
-        0.0f;
-
-    float diagPostConv =
         0.0f;
 
     for (
@@ -541,16 +444,13 @@ int16_t Synthesizer::renderAudio(
         i < m_inputChannelCount;
         ++i)
     {
-        const float inputTransfer =
-            m_inputChannels[i]
-                .transferBuffer[
-                    inputSample];
-
         const float jitteredSample =
             m_filters[i]
                 .jitterFilter
                 .fast_f(
-                    inputTransfer);
+                    m_inputChannels[i]
+                        .transferBuffer[
+                            inputSample]);
 
         const float f_in =
             jitteredSample;
@@ -562,13 +462,39 @@ int16_t Synthesizer::renderAudio(
                     f_in);
 
         const float f =
-            f_in - f_dc;
+            f_in
+            - f_dc;
 
-        const float f_p =
+        float f_p =
             m_filters[i]
                 .derivative
                 .f(
                     f_in);
+
+        /*
+         * iOS audio stability guard.
+         *
+         * Runtime diagnostics showed the derivative branch producing spikes
+         * above 1e10 during closed-throttle deceleration. Even with the normal
+         * 1% dF/F mix, those transients entered convolution above 1e8 and
+         * eventually hard-clipped the 16-bit PCM output.
+         *
+         * Keep the derivative effect, but prevent pathological transients from
+         * overwhelming the rest of the synthesis chain.
+         */
+        if (!std::isfinite(f_p)) {
+            f_p =
+                0.0f;
+        }
+
+        constexpr float derivativeLimit =
+            2.0e7f;
+
+        f_p =
+            std::clamp(
+                f_p,
+                -derivativeLimit,
+                derivativeLimit);
 
 #if defined(__EMSCRIPTEN__)
         const float noise =
@@ -578,7 +504,8 @@ int16_t Synthesizer::renderAudio(
         const float noise =
             2.0f
             * static_cast<float>(
-                static_cast<double>(rand())
+                static_cast<double>(
+                    rand())
                 / RAND_MAX)
             - 1.0f;
 #endif
@@ -590,16 +517,47 @@ int16_t Synthesizer::renderAudio(
                     noise);
 
         const float r_mixed =
-            airNoise * r
-            + (1.0f - airNoise);
+            airNoise
+                * r
+            + (
+                1.0f
+                - airNoise
+            );
+
+        float derivativeContribution =
+            f_p
+            * dF_F_mix;
+
+        const float baseContribution =
+            f
+            * r_mixed
+            * (
+                1.0f
+                - dF_F_mix
+            );
+
+        /*
+         * Bound only the derivative branch. This leaves the main exhaust
+         * signal untouched, preserving the normal engine tone and amplitude.
+         */
+        constexpr float derivativeContributionLimit =
+            250000.0f;
+
+        derivativeContribution =
+            std::clamp(
+                derivativeContribution,
+                -derivativeContributionLimit,
+                derivativeContributionLimit);
 
         float v_in =
-            f_p * dF_F_mix
-            + f
-                * r_mixed
-                * (1.0f - dF_F_mix);
+            derivativeContribution
+            + baseContribution;
 
-        if (
+        if (!std::isfinite(v_in)) {
+            v_in =
+                0.0f;
+        }
+        else if (
             std::fpclassify(v_in)
             == FP_SUBNORMAL)
         {
@@ -620,45 +578,35 @@ int16_t Synthesizer::renderAudio(
                     .convolution
                     .f(
                         v_in)
-                + (1.0f - convAmount)
-                    * v_in
+                + (
+                    1.0f
+                    - convAmount
+                )
+                * v_in
             : v_in;
 
         signal +=
             v;
-
-        if (
-            logThisSample
-            && i == 0)
-        {
-            diagInput =
-                inputTransfer;
-
-            diagJittered =
-                jitteredSample;
-
-            diagDc =
-                f_dc;
-
-            diagAc =
-                f;
-
-            diagDerivative =
-                f_p;
-
-            diagNoiseFiltered =
-                r;
-
-            diagPreConv =
-                v_in;
-
-            diagPostConv =
-                v;
-        }
     }
 
-    const float signalPreAntialias =
-        signal;
+    /*
+     * Last-resort guard before the leveler. Under normal operation the
+     * derivative clamp above should keep us far below this value.
+     */
+    if (!std::isfinite(signal)) {
+        signal =
+            0.0f;
+    }
+    else {
+        constexpr float preLevelerSignalLimit =
+            1.0e6f;
+
+        signal =
+            std::clamp(
+                signal,
+                -preLevelerSignalLimit,
+                preLevelerSignalLimit);
+    }
 
     signal =
         m_antialiasing
@@ -673,11 +621,6 @@ int16_t Synthesizer::renderAudio(
 
     m_levelingFilter.p_minLevel =
         parameters.levelerMinGain;
-
-    const float levelerGainBefore =
-        static_cast<float>(
-            m_levelingFilter
-                .getAttenuation());
 
     const float v_leveled =
         m_levelingFilter
@@ -696,42 +639,6 @@ int16_t Synthesizer::renderAudio(
     else if (r_int < INT16_MIN) {
         r_int =
             INT16_MIN;
-    }
-
-    if (logThisSample) {
-        diag.stream
-            << (diag.sampleIndex - 1)
-            << ",0"
-            << ","
-            << std::setprecision(12)
-            << diagInput
-            << ","
-            << diagJittered
-            << ","
-            << diagDc
-            << ","
-            << diagAc
-            << ","
-            << diagDerivative
-            << ","
-            << diagNoiseFiltered
-            << ","
-            << diagPreConv
-            << ","
-            << diagPostConv
-            << ","
-            << signalPreAntialias
-            << ","
-            << signal
-            << ","
-            << levelerGainBefore
-            << ","
-            << v_leveled
-            << ","
-            << r_int
-            << "\n";
-
-        diag.stream.flush();
     }
 
     return
