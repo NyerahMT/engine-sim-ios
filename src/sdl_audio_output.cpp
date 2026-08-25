@@ -3,6 +3,7 @@
 #include "../include/simulator.h"
 
 #include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -14,9 +15,11 @@ bool SdlAudioOutput::start(Simulator *simulator) {
 
     if (simulator == nullptr) return false;
 
-    // EngineSim synthesizes natively at 44.1 kHz mono S16.
-    // Keep the stream in that clock domain and let SDL perform
-    // any final conversion required by the iOS audio device.
+    /*
+     * EngineSim synthesizes at 44.1 kHz mono S16.
+     * Keep the stream in EngineSim's native format and let SDL
+     * perform any hardware conversion required by iOS.
+     */
     const SDL_AudioSpec spec = {
         SDL_AUDIO_S16,
         1,
@@ -39,7 +42,6 @@ bool SdlAudioOutput::start(Simulator *simulator) {
             false);
 
     m_lastDiagnosticTick = SDL_GetTicks();
-
     m_pcmFrames = 0;
     m_silenceFrames = 0;
     m_peakQueuedBytes = 0;
@@ -51,8 +53,8 @@ bool SdlAudioOutput::start(Simulator *simulator) {
         if (SDL_GetAudioStreamFormat(
                 m_stream,
                 &source,
-                &destination)) {
-
+                &destination))
+        {
             std::fprintf(
                 stderr,
                 "audio: stream=%dHz/%dch -> device=%dHz/%dch\n",
@@ -64,7 +66,7 @@ bool SdlAudioOutput::start(Simulator *simulator) {
     }
 
     if (!SDL_ResumeAudioStreamDevice(m_stream)) {
-        stop();
+        stopLocked();
         return false;
     }
 
@@ -93,7 +95,7 @@ void SdlAudioOutput::audioThread() {
 
                 std::fprintf(
                     stderr,
-                    "audio: pcm=%llu silence=%llu input=%.3fs output=%.3fs stream=%.3fs peak-queue=%dB\n",
+                    "audio: pcm=%llu short=%llu input=%.3fs output=%.3fs stream=%.3fs peak-queue=%dB\n",
                     static_cast<unsigned long long>(
                         m_pcmFrames),
                     static_cast<unsigned long long>(
@@ -115,6 +117,13 @@ void SdlAudioOutput::audioThread() {
             }
         }
 
+        /*
+         * Fast polling is intentional.
+         *
+         * This worker is tiny and lets us refill EngineSim's
+         * 1024-sample reservoir quickly without requiring a large
+         * latency-inducing device queue.
+         */
         std::this_thread::sleep_for(
             std::chrono::milliseconds(1));
     }
@@ -126,32 +135,22 @@ void SdlAudioOutput::fillStream() {
     }
 
     /*
-     * IMPORTANT:
+     * EngineSim's native synth currently keeps roughly
+     * 1024 rendered samples available.
      *
-     * EngineSim's native Synthesizer currently maintains an
-     * internal rendered-output reservoir of 1024 samples.
+     * Use smaller reads so we don't drain the whole producer
+     * reservoir in one shot.
      *
-     * Our previous iOS experiment asked SDL to maintain 4096
-     * samples. That meant the consumer could drain EngineSim's
-     * entire 1024-sample reservoir and immediately request more
-     * before the synthesis worker had replenished it.
-     *
-     * readAudioOutput() intentionally zero-fills short reads.
-     *
-     * Result:
-     *
-     *     real PCM
-     *     silence
-     *     real PCM
-     *     silence
-     *
-     * ...which sounds exactly like clicking and popping.
-     *
-     * Keep the SDL lead synchronized with the actual producer
-     * capacity until we intentionally enlarge both reservoirs.
+     * 256 frames = ~5.8 ms.
      */
+    constexpr int chunkFrames = 256;
 
-    constexpr int chunkFrames = 512;
+    /*
+     * Maintain approximately 23 ms of SDL-side lead.
+     *
+     * Combined with smaller reads this keeps latency low while
+     * giving the synth thread several opportunities to refill.
+     */
     constexpr int targetFrames = 1024;
 
     constexpr int targetBytes =
@@ -163,64 +162,98 @@ void SdlAudioOutput::fillStream() {
         SDL_GetAudioStreamQueued(
             m_stream);
 
-    if (queuedBytes < 0) return;
+    if (queuedBytes < 0) {
+        return;
+    }
 
-    while (queuedBytes < targetBytes) {
+    while (
+        m_running
+        && queuedBytes < targetBytes)
+    {
         std::array<
             std::int16_t,
             chunkFrames> samples{};
 
-        const int frames =
+        const int missingFrames =
+            (targetBytes - queuedBytes)
+            / static_cast<int>(
+                sizeof(std::int16_t));
+
+        const int requestedFrames =
             std::min(
                 chunkFrames,
-                (targetBytes - queuedBytes)
-                    / static_cast<int>(
-                        sizeof(std::int16_t)));
+                missingFrames);
 
-        const int pcmFrames =
+        if (requestedFrames <= 0) {
+            break;
+        }
+
+        const int producedFrames =
             m_simulator->readAudioOutput(
-                frames,
+                requestedFrames,
                 samples.data());
 
         const int validFrames =
-            std::max(
+            std::clamp(
+                producedFrames,
                 0,
-                pcmFrames);
+                requestedFrames);
 
         m_pcmFrames += validFrames;
-        m_silenceFrames += frames - validFrames;
 
         /*
-         * If the synthesizer genuinely ran dry, don't repeatedly
-         * consume another artificial silent chunk in the same
-         * fill loop.
-         *
-         * Queue this chunk, return to the 1 ms audio worker loop,
-         * and give EngineSim's synthesis thread an opportunity to
-         * replenish its reservoir.
+         * Keep this diagnostic counter, but unlike the old version
+         * DO NOT send EngineSim's zero-filled tail to SDL.
          */
+        m_silenceFrames +=
+            requestedFrames
+            - validFrames;
 
-        const int bytes =
-            frames
+        if (validFrames <= 0) {
+            /*
+             * Producer is temporarily dry.
+             *
+             * Do not manufacture silence and do not hammer the
+             * synth while holding this loop. Return to our 1 ms
+             * worker cadence and give it time to produce PCM.
+             */
+            break;
+        }
+
+        /*
+         * This is the important change:
+         *
+         * readAudioOutput() zero-fills everything after
+         * validFrames on a short read.
+         *
+         * Queue ONLY actual generated EngineSim PCM.
+         */
+        const int validBytes =
+            validFrames
             * static_cast<int>(
                 sizeof(std::int16_t));
 
         if (!SDL_PutAudioStreamData(
                 m_stream,
                 samples.data(),
-                bytes)) {
-
+                validBytes))
+        {
             return;
         }
 
-        queuedBytes += bytes;
+        queuedBytes +=
+            validBytes;
 
         m_peakQueuedBytes =
             std::max(
                 m_peakQueuedBytes,
                 queuedBytes);
 
-        if (validFrames < frames) {
+        /*
+         * A short read means we've caught up with the synthesizer.
+         * Don't immediately request another block.
+         */
+        if (validFrames < requestedFrames) {
             break;
         }
     }
@@ -230,8 +263,8 @@ bool SdlAudioOutput::loadImpulseResponse(
     Synthesizer &synthesizer,
     const std::string &path,
     float volume,
-    int index) {
-
+    int index)
+{
     return loadSdlImpulseResponse(
         synthesizer,
         path,
