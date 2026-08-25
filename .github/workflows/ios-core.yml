@@ -1,4 +1,4 @@
-name: Fast iOS Build
+name: EngineSim iOS
 
 on:
   push:
@@ -27,7 +27,12 @@ jobs:
 
     env:
       BUILD_DIR: build/ios
+
       FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
+
+      HOMEBREW_NO_AUTO_UPDATE: 1
+
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
 
     steps:
 
@@ -47,16 +52,57 @@ jobs:
             enginesim-ios-sdl3-
 
 
+      - name: Install script compiler tools
+        run: |
+          brew list bison >/dev/null 2>&1 \
+            || brew install bison
+
+          brew list flex >/dev/null 2>&1 \
+            || brew install flex
+
+          echo "Bison:"
+          /opt/homebrew/opt/bison/bin/bison \
+            --version \
+            | head -n 1
+
+          echo
+
+          echo "Flex:"
+          /opt/homebrew/opt/flex/bin/flex \
+            --version
+
+
       - name: Sanity check
         run: |
-          test -f dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
-          test -f dependencies/submodules/csv-io/CMakeLists.txt
-          test -f dependencies/submodules/piranha/CMakeLists.txt
+          test -f \
+            dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
 
-          test -f ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-          test -f ios/Assets.xcassets/AppIcon.appiconset/Contents.json
+          test -f \
+            dependencies/submodules/csv-io/CMakeLists.txt
 
-          echo "Source tree ready."
+          test -f \
+            dependencies/submodules/piranha/CMakeLists.txt
+
+          test -f \
+            assets/main.mr
+
+          test -f \
+            assets/fonts/slkscr.ttf
+
+          test -f \
+            assets/authored_meshes.obj
+
+          test -f \
+            assets/shaders/engine_sim.vertex.msl
+
+          test -f \
+            assets/shaders/engine_sim.fragment.msl
+
+          test -f \
+            ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+
+          echo \
+            "Real EngineSim source tree ready."
 
 
       - name: Configure
@@ -74,6 +120,7 @@ jobs:
             -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_DIR" \
             -DENGINE_SIM_FETCH_SDL3=ON \
+            -DENGINE_SIM_BUILD_SCRIPTING=ON \
             -DBUILD_SHARED_LIBS=OFF
 
 
@@ -99,52 +146,131 @@ jobs:
           )"
 
           if [ -z "$APP_PATH" ]; then
-            echo "ERROR: EngineSim.app was not generated."
+
+            echo \
+              "ERROR: EngineSim.app was not generated."
+
             exit 1
+
           fi
 
-          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo \
+            "APP_PATH=$APP_PATH" \
+            >> "$GITHUB_ENV"
 
-          echo "EngineSim.app:"
-          echo "$APP_PATH"
-
-          echo
-          echo "Bundle contents:"
-          find "$APP_PATH" \
-            -maxdepth 2 \
-            -type f \
-            -print
+          echo \
+            "EngineSim.app: $APP_PATH"
 
 
-      - name: Validate
+      - name: Validate real EngineSim build
         run: |
           EXECUTABLE="$APP_PATH/EngineSim"
 
-          if [ ! -f "$EXECUTABLE" ]; then
-            echo "ERROR: EngineSim executable missing."
+          test -f \
+            "$EXECUTABLE"
+
+          echo \
+            "================================"
+
+          echo \
+            "Executable"
+
+          echo \
+            "================================"
+
+          file \
+            "$EXECUTABLE"
+
+          ARCH="$(
+            lipo \
+              -info \
+              "$EXECUTABLE"
+          )"
+
+          echo \
+            "$ARCH"
+
+          if ! echo "$ARCH" \
+            | grep -q arm64
+          then
+
+            echo \
+              "ERROR: executable is not arm64."
+
             exit 1
-          fi
 
-          echo "================================"
-          echo "Executable"
-          echo "================================"
-
-          file "$EXECUTABLE"
-
-          ARCH="$(lipo -info "$EXECUTABLE")"
-
-          echo "$ARCH"
-
-          if ! echo "$ARCH" | grep -q "arm64"; then
-            echo "ERROR: EngineSim is not arm64."
-            exit 1
           fi
 
 
           echo
-          echo "================================"
-          echo "EngineSim visualization"
-          echo "================================"
+          echo \
+            "================================"
+
+          echo \
+            "Bundled EngineSim"
+
+          echo \
+            "================================"
+
+          test -f \
+            "$APP_PATH/assets/main.mr"
+
+          test -f \
+            "$APP_PATH/assets/fonts/slkscr.ttf"
+
+          test -f \
+            "$APP_PATH/assets/authored_meshes.obj"
+
+          test -f \
+            "$APP_PATH/assets/shaders/engine_sim.vertex.msl"
+
+          test -f \
+            "$APP_PATH/assets/shaders/engine_sim.fragment.msl"
+
+          echo \
+            "EngineSim runtime assets bundled."
+
+
+          echo
+          echo \
+            "================================"
+
+          echo \
+            "Scripting"
+
+          echo \
+            "================================"
+
+          SCRIPTING_LIBRARY="$(
+            find "$BUILD_DIR" \
+              -type f \
+              -name 'libengine-sim-scripting.a' \
+              | head -n 1
+          )"
+
+          if [ -z "$SCRIPTING_LIBRARY" ]; then
+
+            echo \
+              "ERROR: scripting library missing."
+
+            exit 1
+
+          fi
+
+          lipo \
+            -info \
+            "$SCRIPTING_LIBRARY"
+
+
+          echo
+          echo \
+            "================================"
+
+          echo \
+            "Visualization"
+
+          echo \
+            "================================"
 
           VIS_LIBRARY="$(
             find "$BUILD_DIR" \
@@ -154,126 +280,102 @@ jobs:
           )"
 
           if [ -z "$VIS_LIBRARY" ]; then
-            echo "ERROR: EngineSim visualization was not built."
+
+            echo \
+              "ERROR: visualization library missing."
+
             exit 1
+
           fi
 
-          echo "$VIS_LIBRARY"
-
-          lipo -info "$VIS_LIBRARY"
+          lipo \
+            -info \
+            "$VIS_LIBRARY"
 
 
           echo
-          echo "================================"
-          echo "App icon"
-          echo "================================"
+          echo \
+            "================================"
 
-          echo "Icon-related files in bundle:"
+          echo \
+            "Linked EngineSim symbols"
 
-          find "$APP_PATH" \
-            -type f \
-            \( \
-              -iname '*AppIcon*' \
-              -o \
-              -iname '*Icon*.png' \
-              -o \
-              -name 'Assets.car' \
-            \) \
-            -print \
+          echo \
+            "================================"
+
+          nm \
+            "$EXECUTABLE" \
+            | grep \
+              -E \
+              'EngineSimApplication|SdlGpuRenderer|SdlAudioOutput' \
+            | head -n 30 \
             || true
 
 
           echo
-          echo "CFBundleIcons metadata:"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIcons" \
-            "$APP_PATH/Info.plist" \
-            2>/dev/null \
-            || true
-
-
-          echo
-          echo "CFBundleIcons~ipad metadata:"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIcons~ipad" \
-            "$APP_PATH/Info.plist" \
-            2>/dev/null \
-            || true
-
-
-          ICON_METADATA="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleIcons" \
-              "$APP_PATH/Info.plist" \
-              2>/dev/null \
-              || true
-          )"
-
-          ICON_FILES="$(
-            find "$APP_PATH" \
-              -type f \
-              \( \
-                -iname '*AppIcon*' \
-                -o \
-                -iname '*Icon*.png' \
-                -o \
-                -name 'Assets.car' \
-              \) \
-              -print
-          )"
-
-          if [ -z "$ICON_METADATA" ] && [ -z "$ICON_FILES" ]; then
-            echo
-            echo "WARNING:"
-            echo "No compiled icon metadata/files were detected."
-            echo "The IPA will still be produced so we can inspect it on-device."
-          else
-            echo
-            echo "App icon compilation detected."
-          fi
-
-
-          echo
-          echo "================================"
-          echo "SUCCESS"
-          echo "================================"
-
-          echo "arm64 executable: yes"
-          echo "SDL3 host: yes"
-          echo "EngineSim visualization: yes"
-          echo "Application bundle: yes"
+          echo \
+            "REAL ENGINESIM iOS BUILD COMPLETE."
 
 
       - name: Package IPA
         run: |
-          rm -rf artifacts
+          rm -rf \
+            artifacts
 
-          mkdir -p artifacts/Payload
+          mkdir -p \
+            artifacts/Payload
 
           cp -R \
             "$APP_PATH" \
             artifacts/Payload/
 
-          cat > artifacts/BUILD_INFO.txt <<'EOF'
+          cat \
+            > artifacts/BUILD_INFO.txt \
+            <<'EOF'
+
           EngineSim iOS
           =============
 
-          Platform: iPhoneOS
-          Architecture: arm64
-          Configuration: Debug
+          Milestone:
+          Real EngineSim application
 
-          SDL3: enabled
-          Touch: enabled
-          EngineSim core: enabled
-          EngineSim visualization: enabled
-          App icon source: enabled
+          Platform:
+          iPhoneOS arm64
 
-          Code signing: disabled
+          Real EngineSim application:
+          enabled
+
+          EngineSim scripting:
+          enabled
+
+          EngineSim assets:
+          bundled
+
+          SDL GPU renderer:
+          enabled
+
+          Metal shaders:
+          bundled
+
+          Touch input:
+          enabled
+
+          SDL audio output:
+          enabled
+
+          App icon:
+          enabled
+
+          Signing:
+          disabled
+
+          Expected result:
+          Actual Engine Simulator
+          interface and simulation.
           EOF
 
-          cd artifacts
+          cd \
+            artifacts
 
           zip \
             -qr \
@@ -285,7 +387,7 @@ jobs:
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: engine-sim-ios
+          name: engine-sim-ios-real
           path: |
             artifacts/EngineSim-iOS-unsigned.ipa
             artifacts/BUILD_INFO.txt
