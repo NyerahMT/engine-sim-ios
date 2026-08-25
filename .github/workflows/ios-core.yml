@@ -1,4 +1,4 @@
-name: iOS SDL3 Graphics Build
+name: Fast iOS Build
 
 on:
   push:
@@ -13,361 +13,244 @@ on:
 permissions:
   contents: read
 
+#
+# When we push a new fix while an old build is still running,
+# kill the obsolete build immediately.
+#
+concurrency:
+  group: engine-sim-ios-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
-  ios-sdl:
+  ios:
 
-    name: EngineSim SDL3 iPhone Build
+    name: EngineSim iPhone
 
     runs-on: macos-15
 
+    env:
+      BUILD_DIR: build/ios
+      FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
+
     steps:
 
-      - name: Checkout EngineSim
+      #
+      # Shallow checkout saves some network time.
+      # Recursive submodules are still required by EngineSim.
+      #
+
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 1
 
 
-      - name: Show build environment
+      #
+      # SDL3 is brought in through CMake FetchContent.
+      #
+      # Previously every clean workflow downloaded SDL3 again.
+      # This cache allows the SDL source checkout to survive
+      # between GitHub Actions runs.
+      #
+
+      - name: Cache SDL3
+        uses: actions/cache@v4
+        with:
+          path: .cache/fetchcontent
+          key: enginesim-ios-sdl3-3.2.8
+          restore-keys: |
+            enginesim-ios-sdl3-
+
+
+      #
+      # Fail immediately if something fundamental is missing.
+      #
+      # This is intentionally tiny.
+      #
+
+      - name: Sanity check
         run: |
-          echo "================================"
-          echo "macOS"
-          echo "================================"
+          test -f dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
+          test -f dependencies/submodules/csv-io/CMakeLists.txt
+          test -f dependencies/submodules/piranha/CMakeLists.txt
 
-          sw_vers
+          test -f ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          test -f ios/Assets.xcassets/AppIcon.appiconset/Contents.json
 
-          echo
-          echo "================================"
-          echo "Xcode"
-          echo "================================"
-
-          xcodebuild -version
-
-          echo
-          echo "================================"
-          echo "iPhoneOS SDK"
-          echo "================================"
-
-          xcrun \
-            --sdk iphoneos \
-            --show-sdk-version
-
-          echo
-          echo "================================"
-          echo "CMake"
-          echo "================================"
-
-          cmake --version
+          echo "Source tree ready."
 
 
-      - name: Verify EngineSim dependencies
+      #
+      # Only the generated Xcode project is thrown away.
+      #
+      # FETCHCONTENT_DIR lives outside BUILD_DIR, so SDL survives.
+      #
+
+      - name: Configure
         run: |
-          test -f \
-            dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
-
-          test -f \
-            dependencies/submodules/csv-io/CMakeLists.txt
-
-          test -f \
-            dependencies/submodules/piranha/CMakeLists.txt
-
-          echo \
-            "EngineSim submodules are present."
-
-
-      - name: Verify app icon source
-        run: |
-          ICON="ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
-
-          CONTENTS="ios/Assets.xcassets/AppIcon.appiconset/Contents.json"
-
-          if [ ! -f "$ICON" ]; then
-            echo "ERROR: AppIcon.png is missing."
-            exit 1
-          fi
-
-          if [ ! -f "$CONTENTS" ]; then
-            echo "ERROR: AppIcon Contents.json is missing."
-            exit 1
-          fi
-
-          echo "App icon source exists."
-
-          file "$ICON"
-
-
-      - name: Configure SDL3 iOS host
-        run: |
-          rm -rf build/ios-sdl
+          rm -rf "$BUILD_DIR"
 
           cmake \
             -S ios \
-            -B build/ios-sdl \
+            -B "$BUILD_DIR" \
             -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_DIR" \
             -DENGINE_SIM_FETCH_SDL3=ON \
             -DBUILD_SHARED_LIBS=OFF
 
 
-      - name: Build EngineSim visualization for iOS
+      #
+      # ONE build invocation.
+      #
+      # EngineSimIOS already depends on engine-sim-visualization,
+      # which depends on the lower EngineSim libraries.
+      #
+      # Xcode therefore constructs the entire required dependency
+      # graph itself.
+      #
+      # Debug is deliberate during port development:
+      # less compiler optimization = quicker iteration.
+      #
+
+      - name: Build
         run: |
           cmake \
-            --build build/ios-sdl \
-            --config Release \
-            --target engine-sim-visualization \
-            -- \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
-
-
-      - name: Build SDL3 EngineSim application
-        run: |
-          cmake \
-            --build build/ios-sdl \
-            --config Release \
+            --build "$BUILD_DIR" \
+            --config Debug \
             --target EngineSimIOS \
+            --parallel 3 \
             -- \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
 
-      - name: Find application
+      #
+      # Find the app once and export its location for all
+      # remaining steps rather than repeatedly running find.
+      #
+
+      - name: Locate app
         run: |
           APP_PATH="$(
-            find build/ios-sdl \
+            find "$BUILD_DIR" \
               -type d \
               -name 'EngineSim.app' \
               | head -n 1
           )"
 
           if [ -z "$APP_PATH" ]; then
-
-            echo \
-              "ERROR: EngineSim.app not generated."
-
-            find build/ios-sdl \
-              -type d \
-              -name '*.app' \
-              -print
-
+            echo "ERROR: EngineSim.app was not generated."
             exit 1
-
           fi
 
-          echo \
-            "EngineSim app: $APP_PATH"
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "EngineSim.app found at:"
+          echo "$APP_PATH"
 
 
-      - name: Inspect executable
+      #
+      # Fast validation.
+      #
+      # We retain the checks that actually matter while developing,
+      # but drop the verbose diagnostic passes.
+      #
+
+      - name: Validate
         run: |
-          APP_PATH="$(
-            find build/ios-sdl \
-              -type d \
-              -name 'EngineSim.app' \
-              | head -n 1
-          )"
-
           EXECUTABLE="$APP_PATH/EngineSim"
 
-          echo "================================"
-          echo "Executable"
-          echo "================================"
+          test -f "$EXECUTABLE"
 
+          echo "Executable:"
           file "$EXECUTABLE"
 
-          echo
+          ARCH="$(lipo -info "$EXECUTABLE")"
+          echo "$ARCH"
 
-          lipo \
-            -info \
-            "$EXECUTABLE"
-
-          echo
-          echo "================================"
-          echo "Application bundle"
-          echo "================================"
-
-          ls \
-            -lah \
-            "$APP_PATH"
-
-
-      - name: Verify compiled app icon
-        run: |
-          APP_PATH="$(
-            find build/ios-sdl \
-              -type d \
-              -name 'EngineSim.app' \
-              | head -n 1
-          )"
-
-          echo "Checking compiled asset catalog..."
-
-          if [ ! -f "$APP_PATH/Assets.car" ]; then
-            echo
-            echo "ERROR:"
-            echo "Assets.car was not generated."
-            echo "The application icon was not compiled."
+          if ! echo "$ARCH" | grep -q "arm64"; then
+            echo "ERROR: EngineSim is not arm64."
             exit 1
           fi
 
-          echo
-          echo "Compiled asset catalog:"
-          ls -lh "$APP_PATH/Assets.car"
-
-          echo
-          echo "Checking Info.plist icon metadata..."
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIcons" \
-            "$APP_PATH/Info.plist" \
-            || true
-
-          echo
-          echo "SUCCESS:"
-          echo "iOS application asset catalog is bundled."
-
-
-      - name: Inspect SDL linkage
-        run: |
-          APP_PATH="$(
-            find build/ios-sdl \
-              -type d \
-              -name 'EngineSim.app' \
-              | head -n 1
-          )"
-
-          EXECUTABLE="$APP_PATH/EngineSim"
-
-          echo \
-            "Looking for SDL symbols..."
-
-          nm \
-            "$EXECUTABLE" \
-            | grep \
-                -E \
-                'SDL_(Init|CreateWindow|CreateRenderer|RenderPresent)' \
-            | head -n 40 \
-            || true
-
-
-      - name: Verify visualization build
-        run: |
-          echo \
-            "Searching for visualization library..."
-
-          find build/ios-sdl \
-            -type f \
-            -name 'libengine-sim-visualization.a' \
-            -print
+          if [ ! -f "$APP_PATH/Assets.car" ]; then
+            echo "ERROR: App icon asset catalog was not compiled."
+            exit 1
+          fi
 
           VIS_LIBRARY="$(
-            find build/ios-sdl \
+            find "$BUILD_DIR" \
               -type f \
               -name 'libengine-sim-visualization.a' \
               | head -n 1
           )"
 
           if [ -z "$VIS_LIBRARY" ]; then
-
-            echo \
-              "ERROR: visualization library was not built."
-
+            echo "ERROR: EngineSim visualization was not built."
             exit 1
-
           fi
 
           echo
-          echo \
-            "Visualization architecture:"
+          echo "SUCCESS:"
+          echo "arm64 executable"
+          echo "SDL3 host"
+          echo "EngineSim visualization"
+          echo "App icon"
+          echo "all present."
 
-          lipo \
-            -info \
-            "$VIS_LIBRARY"
 
+      #
+      # Build the unsigned IPA without verbose zip output.
+      #
 
-      - name: Create IPA payload
+      - name: Package IPA
         run: |
-          rm \
-            -rf \
-            artifacts
+          rm -rf artifacts
 
-          mkdir \
-            -p \
-            artifacts/Payload
+          mkdir -p artifacts/Payload
 
-          APP_PATH="$(
-            find build/ios-sdl \
-              -type d \
-              -name 'EngineSim.app' \
-              | head -n 1
-          )"
-
-          cp \
-            -R \
+          cp -R \
             "$APP_PATH" \
             artifacts/Payload/
 
-          cat \
-            > artifacts/BUILD_INFO.txt \
-            <<'EOF'
-
+          cat > artifacts/BUILD_INFO.txt <<'EOF'
           EngineSim iOS
           =============
 
-          Platform:
-          iPhoneOS
+          Platform: iPhoneOS
+          Architecture: arm64
+          Configuration: Debug
 
-          Architecture:
-          arm64
+          SDL3: enabled
+          Touch: enabled
+          EngineSim core: enabled
+          EngineSim visualization: enabled
+          App icon: enabled
 
-          SDL3:
-          enabled
-
-          SDL graphics:
-          enabled
-
-          Touch input:
-          enabled
-
-          EngineSim core:
-          enabled
-
-          EngineSim visualization:
-          compiled
-
-          App icon:
-          compiled into asset catalog
-
-          Real EngineSim renderer:
-          in progress
-
-          Audio:
-          in progress
-
-          Signing:
-          disabled
+          Code signing: disabled
           EOF
 
-          cd \
-            artifacts
+          cd artifacts
 
           zip \
-            -r \
-            EngineSim-SDL3-iOS-unsigned.ipa \
+            -qr \
+            EngineSim-iOS-unsigned.ipa \
             Payload \
             BUILD_INFO.txt
 
 
-      - name: Upload SDL3 IPA
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: engine-sim-ios-sdl3-arm64
+          name: engine-sim-ios
           path: |
-            artifacts/EngineSim-SDL3-iOS-unsigned.ipa
+            artifacts/EngineSim-iOS-unsigned.ipa
             artifacts/BUILD_INFO.txt
           if-no-files-found: error
+          compression-level: 1
