@@ -14,38 +14,78 @@ public:
         EnginePicker
     };
 
-    void initialize(EngineSimApplication *app) override;
+    void initialize(
+        EngineSimApplication *app) override;
+
     void destroy() override;
     void update(float dt) override;
     void render() override;
-    void signal(UiElement *element, Event event) override;
-    void onMouseClick(const Point &mouseLocal) override;
-    void onMouseScroll(int mouseScroll) override;
+
+    void signal(
+        UiElement *element,
+        Event event) override;
+
+    void onMouseClick(
+        const Point &mouseLocal) override;
+
+    void onMouseScroll(
+        int mouseScroll) override;
 
     void present(Kind kind);
     void dismiss();
-    Kind kind() const { return m_kind; }
+
+    Kind kind() const {
+        return m_kind;
+    }
 
 private:
     UiButton *m_closeButton = nullptr;
     UiButton *m_githubButton = nullptr;
     UiButton *m_issuesButton = nullptr;
-    UiButton *m_pickerScrollUpButton = nullptr;
-    UiButton *m_pickerScrollDownButton = nullptr;
 
-    // Non-owning pointers. UiElement owns the actual button objects.
-    std::vector<UiButton *> m_engineButtons;
+    UiButton *m_pickerScrollUpButton =
+        nullptr;
 
-    Kind m_kind = Kind::None;
-    float m_pickerScrollOffset = 0.0f;
-    float m_pickerMaxScrollOffset = 0.0f;
+    UiButton *m_pickerScrollDownButton =
+        nullptr;
+
+    /*
+     * Non-owning pointers.
+     *
+     * UiElement owns/deletes the actual buttons.
+     */
+    std::vector<UiButton *>
+        m_engineButtons;
+
+    Kind m_kind =
+        Kind::None;
+
+    float m_pickerScrollOffset =
+        0.0f;
+
+    float m_pickerMaxScrollOffset =
+        0.0f;
 
     Bounds viewportBounds() const;
     Bounds dialogBounds() const;
 
-    void layoutControls(const Bounds &panel);
-    void layoutEnginePicker(const Bounds &panel);
+    void layoutControls(
+        const Bounds &panel);
+
+    void layoutEnginePicker(
+        const Bounds &panel);
+
     void setChildrenVisible();
+
+    /*
+     * Refresh the filesystem-backed engine list and ensure
+     * there are enough persistent UiButton children.
+     *
+     * Existing children are reused instead of deleted while
+     * the application is alive.
+     */
+    void refreshPicker();
+    void syncEngineButtons();
 };
 
 #endif
