@@ -4,7 +4,6 @@
 #include "vehicle.h"
 #include "engine.h"
 #include "scs.h"
-#include "engine_sim_clutch_constraint.h"
 
 class Transmission {
 public:
@@ -19,7 +18,12 @@ public:
             0.0;
 
         /*
-         * Community Edition clutch dynamics.
+         * Kept for Community Edition script compatibility.
+         *
+         * The iOS port intentionally uses the original Engine Simulator
+         * clutch physics. These values are accepted and stored so newer
+         * scripts still load, but they do not replace the stock clutch
+         * constraint.
          */
         double MaxClutchFlex =
             0.0;
@@ -77,6 +81,9 @@ public:
         return m_clutchPressure;
     }
 
+    /*
+     * Compatibility accessors.
+     */
     inline double
     getMaxClutchFlex() const
     {
@@ -101,24 +108,29 @@ public:
         return m_clutchDamping;
     }
 
+    /*
+     * Stock Engine Simulator clutch has no modeled torsional flex.
+     */
     inline double
     getClutchFlex() const
     {
-        return
-            m_clutchConstraint
-                .getFlex();
+        return 0.0;
     }
 
 protected:
-    EngineSimClutchConstraint
+    /*
+     * Original Engine Simulator clutch constraint.
+     *
+     * Do not replace this with the CE spring/flex clutch in the iOS port.
+     * The stock constraint is velocity-coupled and torque-limited only.
+     */
+    atg_scs::ClutchConstraint
         m_clutchConstraint;
 
     atg_scs::RigidBody
         *m_rotatingMass;
 
     Vehicle *m_vehicle;
-
-    Engine *m_engine;
 
     int m_gear;
     int m_newGear;
@@ -129,13 +141,13 @@ protected:
     double m_maxClutchTorque;
     double m_clutchPressure;
 
+    /*
+     * Stored only for script/API compatibility.
+     */
     double m_maxClutchFlex;
     bool m_limitClutchFlex;
-
     double m_clutchStiffness;
     double m_clutchDamping;
-
-    bool m_clutchWasEngaged;
 };
 
-#endif
+#endif /* ATG_ENGINE_SIM_TRANSMISSION_H */
