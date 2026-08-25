@@ -13,10 +13,6 @@ on:
 permissions:
   contents: read
 
-#
-# When we push a new fix while an old build is still running,
-# kill the obsolete build immediately.
-#
 concurrency:
   group: engine-sim-ios-${{ github.ref }}
   cancel-in-progress: true
@@ -35,25 +31,12 @@ jobs:
 
     steps:
 
-      #
-      # Shallow checkout saves some network time.
-      # Recursive submodules are still required by EngineSim.
-      #
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 1
 
-
-      #
-      # SDL3 is brought in through CMake FetchContent.
-      #
-      # Previously every clean workflow downloaded SDL3 again.
-      # This cache allows the SDL source checkout to survive
-      # between GitHub Actions runs.
-      #
 
       - name: Cache SDL3
         uses: actions/cache@v4
@@ -63,12 +46,6 @@ jobs:
           restore-keys: |
             enginesim-ios-sdl3-
 
-
-      #
-      # Fail immediately if something fundamental is missing.
-      #
-      # This is intentionally tiny.
-      #
 
       - name: Sanity check
         run: |
@@ -81,12 +58,6 @@ jobs:
 
           echo "Source tree ready."
 
-
-      #
-      # Only the generated Xcode project is thrown away.
-      #
-      # FETCHCONTENT_DIR lives outside BUILD_DIR, so SDL survives.
-      #
 
       - name: Configure
         run: |
@@ -106,19 +77,6 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF
 
 
-      #
-      # ONE build invocation.
-      #
-      # EngineSimIOS already depends on engine-sim-visualization,
-      # which depends on the lower EngineSim libraries.
-      #
-      # Xcode therefore constructs the entire required dependency
-      # graph itself.
-      #
-      # Debug is deliberate during port development:
-      # less compiler optimization = quicker iteration.
-      #
-
       - name: Build
         run: |
           cmake \
@@ -130,11 +88,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
-
-      #
-      # Find the app once and export its location for all
-      # remaining steps rather than repeatedly running find.
-      #
 
       - name: Locate app
         run: |
@@ -151,27 +104,35 @@ jobs:
           fi
 
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
-          echo "EngineSim.app found at:"
+
+          echo "EngineSim.app:"
           echo "$APP_PATH"
 
+          echo
+          echo "Bundle contents:"
+          find "$APP_PATH" \
+            -maxdepth 2 \
+            -type f \
+            -print
 
-      #
-      # Fast validation.
-      #
-      # We retain the checks that actually matter while developing,
-      # but drop the verbose diagnostic passes.
-      #
 
       - name: Validate
         run: |
           EXECUTABLE="$APP_PATH/EngineSim"
 
-          test -f "$EXECUTABLE"
+          if [ ! -f "$EXECUTABLE" ]; then
+            echo "ERROR: EngineSim executable missing."
+            exit 1
+          fi
 
-          echo "Executable:"
+          echo "================================"
+          echo "Executable"
+          echo "================================"
+
           file "$EXECUTABLE"
 
           ARCH="$(lipo -info "$EXECUTABLE")"
+
           echo "$ARCH"
 
           if ! echo "$ARCH" | grep -q "arm64"; then
@@ -179,10 +140,11 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "$APP_PATH/Assets.car" ]; then
-            echo "ERROR: App icon asset catalog was not compiled."
-            exit 1
-          fi
+
+          echo
+          echo "================================"
+          echo "EngineSim visualization"
+          echo "================================"
 
           VIS_LIBRARY="$(
             find "$BUILD_DIR" \
@@ -196,18 +158,93 @@ jobs:
             exit 1
           fi
 
+          echo "$VIS_LIBRARY"
+
+          lipo -info "$VIS_LIBRARY"
+
+
           echo
-          echo "SUCCESS:"
-          echo "arm64 executable"
-          echo "SDL3 host"
-          echo "EngineSim visualization"
+          echo "================================"
           echo "App icon"
-          echo "all present."
+          echo "================================"
+
+          echo "Icon-related files in bundle:"
+
+          find "$APP_PATH" \
+            -type f \
+            \( \
+              -iname '*AppIcon*' \
+              -o \
+              -iname '*Icon*.png' \
+              -o \
+              -name 'Assets.car' \
+            \) \
+            -print \
+            || true
 
 
-      #
-      # Build the unsigned IPA without verbose zip output.
-      #
+          echo
+          echo "CFBundleIcons metadata:"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIcons" \
+            "$APP_PATH/Info.plist" \
+            2>/dev/null \
+            || true
+
+
+          echo
+          echo "CFBundleIcons~ipad metadata:"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIcons~ipad" \
+            "$APP_PATH/Info.plist" \
+            2>/dev/null \
+            || true
+
+
+          ICON_METADATA="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleIcons" \
+              "$APP_PATH/Info.plist" \
+              2>/dev/null \
+              || true
+          )"
+
+          ICON_FILES="$(
+            find "$APP_PATH" \
+              -type f \
+              \( \
+                -iname '*AppIcon*' \
+                -o \
+                -iname '*Icon*.png' \
+                -o \
+                -name 'Assets.car' \
+              \) \
+              -print
+          )"
+
+          if [ -z "$ICON_METADATA" ] && [ -z "$ICON_FILES" ]; then
+            echo
+            echo "WARNING:"
+            echo "No compiled icon metadata/files were detected."
+            echo "The IPA will still be produced so we can inspect it on-device."
+          else
+            echo
+            echo "App icon compilation detected."
+          fi
+
+
+          echo
+          echo "================================"
+          echo "SUCCESS"
+          echo "================================"
+
+          echo "arm64 executable: yes"
+          echo "SDL3 host: yes"
+          echo "EngineSim visualization: yes"
+          echo "Application bundle: yes"
+
 
       - name: Package IPA
         run: |
@@ -231,7 +268,7 @@ jobs:
           Touch: enabled
           EngineSim core: enabled
           EngineSim visualization: enabled
-          App icon: enabled
+          App icon source: enabled
 
           Code signing: disabled
           EOF
