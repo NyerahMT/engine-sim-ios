@@ -27,14 +27,16 @@ jobs:
 
     env:
       BUILD_DIR: build/ios
-
       FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
 
       HOMEBREW_NO_AUTO_UPDATE: 1
-
       HOMEBREW_NO_INSTALL_CLEANUP: 1
 
     steps:
+
+      # ============================================================
+      # Source
+      # ============================================================
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,71 +45,121 @@ jobs:
           fetch-depth: 1
 
 
-      - name: Cache SDL3
+      # ============================================================
+      # Dependency cache
+      # ============================================================
+
+      - name: Cache SDL3 FetchContent
         uses: actions/cache@v4
         with:
           path: .cache/fetchcontent
-          key: enginesim-ios-sdl3-3.2.8
+          key: enginesim-ios-fetchcontent-v2-${{ hashFiles('cmake/EngineSimSDL.cmake', '.gitmodules') }}
           restore-keys: |
-            enginesim-ios-sdl3-
+            enginesim-ios-fetchcontent-v2-
+            enginesim-ios-fetchcontent-
 
 
-      - name: Install script compiler tools
+      # ============================================================
+      # Incremental Xcode / CMake cache
+      #
+      # IMPORTANT:
+      #
+      # Each commit gets a new cache key, but restore-keys pulls the
+      # newest compatible build from the previous successful commit.
+      #
+      # This means:
+      #
+      #   edit sdl_audio_output.cpp
+      #          ↓
+      #   restore previous EngineSim build
+      #          ↓
+      #   compile sdl_audio_output.cpp
+      #          ↓
+      #   relink
+      #          ↓
+      #   IPA
+      #
+      # instead of recompiling the whole project.
+      # ============================================================
+
+      - name: Cache incremental iOS build
+        uses: actions/cache@v4
+        with:
+          path: build/ios
+          key: >-
+            enginesim-ios-release-v4-
+            ${{ hashFiles(
+              'CMakeLists.txt',
+              'ios/CMakeLists.txt',
+              'cmake/**/*.cmake',
+              '.gitmodules'
+            ) }}-
+            ${{ github.sha }}
+
+          restore-keys: |
+            enginesim-ios-release-v4-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
+            enginesim-ios-release-v4-
+
+
+      # ============================================================
+      # Build tools
+      # ============================================================
+
+      - name: Prepare script compiler tools
         run: |
-          brew list bison >/dev/null 2>&1 \
-            || brew install bison
+          if ! brew list bison >/dev/null 2>&1; then
+            brew install bison
+          fi
 
-          brew list flex >/dev/null 2>&1 \
-            || brew install flex
+          if ! brew list flex >/dev/null 2>&1; then
+            brew install flex
+          fi
+
+          echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
 
           echo "Bison:"
-          /opt/homebrew/opt/bison/bin/bison \
-            --version \
-            | head -n 1
-
-          echo
+          /opt/homebrew/opt/bison/bin/bison --version | head -n 1
 
           echo "Flex:"
-          /opt/homebrew/opt/flex/bin/flex \
-            --version
+          /opt/homebrew/opt/flex/bin/flex --version
 
+
+      # ============================================================
+      # Sanity check
+      # ============================================================
 
       - name: Sanity check
         run: |
-          test -f \
-            dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
+          test -f dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
+          test -f dependencies/submodules/csv-io/CMakeLists.txt
+          test -f dependencies/submodules/piranha/CMakeLists.txt
 
-          test -f \
-            dependencies/submodules/csv-io/CMakeLists.txt
+          test -f assets/main.mr
+          test -f assets/fonts/slkscr.ttf
+          test -f assets/authored_meshes.obj
 
-          test -f \
-            dependencies/submodules/piranha/CMakeLists.txt
+          test -f assets/shaders/engine_sim.vertex.msl
+          test -f assets/shaders/engine_sim.fragment.msl
 
-          test -f \
-            assets/main.mr
+          test -f ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 
-          test -f \
-            assets/fonts/slkscr.ttf
-
-          test -f \
-            assets/authored_meshes.obj
-
-          test -f \
-            assets/shaders/engine_sim.vertex.msl
-
-          test -f \
-            assets/shaders/engine_sim.fragment.msl
-
-          test -f \
-            ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-
-          echo \
-            "Real EngineSim source tree ready."
+          echo "EngineSim source tree ready."
 
 
-      - name: Configure
+      # ============================================================
+      # Configure
+      #
+      # DO NOT DELETE BUILD_DIR.
+      #
+      # CMake is intentionally run over the restored build tree.
+      # It will update the Xcode project if necessary while keeping
+      # valid object files from the previous build.
+      # ============================================================
+
+      - name: Configure incremental iOS build
         run: |
-          rm -rf "$BUILD_DIR"
+          mkdir -p "$BUILD_DIR"
 
           cmake \
             -S ios \
@@ -124,36 +176,31 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF
 
 
+      # ============================================================
+      # Release build
       #
-      # IMPORTANT PERFORMANCE CHANGE
-      #
-      # Previous on-device builds were Debug.
-      #
-      # EngineSim performs:
-      #
-      # - combustion simulation
-      # - crank / piston physics
-      # - synthesizer generation
-      # - procedural UI geometry
-      # - hundreds of thousands of potential vertices
-      # - gauge spring simulation
-      #
-      # Debug disables most compiler optimization.
-      #
-      # Release lets Clang optimize the real ARM64 code.
-      #
+      # Let the runner use all available CPU cores.
+      # ============================================================
 
-      - name: Build Release
+      - name: Build Release incrementally
         run: |
+          JOBS="$(sysctl -n hw.ncpu)"
+
+          echo "Building with $JOBS parallel jobs."
+
           cmake \
             --build "$BUILD_DIR" \
             --config Release \
             --target EngineSimIOS \
-            --parallel 3 \
+            --parallel "$JOBS" \
             -- \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
+
+      # ============================================================
+      # Locate app
+      # ============================================================
 
       - name: Locate app
         run: |
@@ -166,268 +213,77 @@ jobs:
           )"
 
           if [ -z "$APP_PATH" ]; then
-
             APP_PATH="$(
               find "$BUILD_DIR" \
                 -type d \
                 -name 'EngineSim.app' \
                 | head -n 1
             )"
-
           fi
 
           if [ -z "$APP_PATH" ]; then
-
-            echo \
-              "ERROR: EngineSim.app was not generated."
-
+            echo "ERROR: EngineSim.app was not generated."
             exit 1
-
           fi
 
-          echo \
-            "APP_PATH=$APP_PATH" \
-            >> "$GITHUB_ENV"
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
 
-          echo \
-            "EngineSim.app: $APP_PATH"
+          echo "EngineSim.app:"
+          echo "$APP_PATH"
 
 
-      - name: Validate Release EngineSim build
+      # ============================================================
+      # Lightweight validation
+      #
+      # We don't need to repeatedly crawl the entire build tree
+      # and run nm against the whole executable on every iteration.
+      # The build/link succeeding already proves most of that.
+      # ============================================================
+
+      - name: Validate iPhone build
         run: |
           EXECUTABLE="$APP_PATH/EngineSim"
 
-          test -f \
-            "$EXECUTABLE"
+          test -f "$EXECUTABLE"
 
+          echo "Executable:"
+          file "$EXECUTABLE"
 
-          echo \
-            "================================"
+          ARCH="$(lipo -info "$EXECUTABLE")"
+          echo "$ARCH"
 
-          echo \
-            "Executable"
-
-          echo \
-            "================================"
-
-          file \
-            "$EXECUTABLE"
-
-          ARCH="$(
-            lipo \
-              -info \
-              "$EXECUTABLE"
-          )"
-
-          echo \
-            "$ARCH"
-
-          if ! echo "$ARCH" \
-            | grep -q arm64
-          then
-
-            echo \
-              "ERROR: executable is not arm64."
-
+          if ! echo "$ARCH" | grep -q arm64; then
+            echo "ERROR: EngineSim executable is not arm64."
             exit 1
-
           fi
 
+          test -f "$APP_PATH/assets/main.mr"
+          test -f "$APP_PATH/assets/fonts/slkscr.ttf"
+          test -f "$APP_PATH/assets/authored_meshes.obj"
+          test -f "$APP_PATH/assets/shaders/engine_sim.vertex.msl"
+          test -f "$APP_PATH/assets/shaders/engine_sim.fragment.msl"
 
           echo
-          echo \
-            "================================"
-
-          echo \
-            "Release optimization"
-
-          echo \
-            "================================"
-
-          if echo "$APP_PATH" \
-            | grep -q 'Release-iphoneos'
-          then
-
-            echo \
-              "Release iPhoneOS configuration confirmed."
-
-          else
-
-            echo \
-              "WARNING: app path does not contain Release-iphoneos."
-
-          fi
+          echo "Release ARM64 EngineSim.app validated."
 
 
-          echo
-          echo \
-            "================================"
-
-          echo \
-            "Bundled EngineSim"
-
-          echo \
-            "================================"
-
-          test -f \
-            "$APP_PATH/assets/main.mr"
-
-          test -f \
-            "$APP_PATH/assets/fonts/slkscr.ttf"
-
-          test -f \
-            "$APP_PATH/assets/authored_meshes.obj"
-
-          test -f \
-            "$APP_PATH/assets/shaders/engine_sim.vertex.msl"
-
-          test -f \
-            "$APP_PATH/assets/shaders/engine_sim.fragment.msl"
-
-          echo \
-            "EngineSim runtime assets bundled."
-
-
-          echo
-          echo \
-            "================================"
-
-          echo \
-            "Scripting"
-
-          echo \
-            "================================"
-
-          SCRIPTING_LIBRARY="$(
-            find "$BUILD_DIR" \
-              -type f \
-              -path '*Release*' \
-              -name 'libengine-sim-scripting.a' \
-              | head -n 1
-          )"
-
-          if [ -z "$SCRIPTING_LIBRARY" ]; then
-
-            SCRIPTING_LIBRARY="$(
-              find "$BUILD_DIR" \
-                -type f \
-                -name 'libengine-sim-scripting.a' \
-                | head -n 1
-            )"
-
-          fi
-
-          if [ -z "$SCRIPTING_LIBRARY" ]; then
-
-            echo \
-              "ERROR: scripting library missing."
-
-            exit 1
-
-          fi
-
-          lipo \
-            -info \
-            "$SCRIPTING_LIBRARY"
-
-
-          echo
-          echo \
-            "================================"
-
-          echo \
-            "Visualization"
-
-          echo \
-            "================================"
-
-          VIS_LIBRARY="$(
-            find "$BUILD_DIR" \
-              -type f \
-              -path '*Release*' \
-              -name 'libengine-sim-visualization.a' \
-              | head -n 1
-          )"
-
-          if [ -z "$VIS_LIBRARY" ]; then
-
-            VIS_LIBRARY="$(
-              find "$BUILD_DIR" \
-                -type f \
-                -name 'libengine-sim-visualization.a' \
-                | head -n 1
-            )"
-
-          fi
-
-          if [ -z "$VIS_LIBRARY" ]; then
-
-            echo \
-              "ERROR: visualization library missing."
-
-            exit 1
-
-          fi
-
-          lipo \
-            -info \
-            "$VIS_LIBRARY"
-
-
-          echo
-          echo \
-            "================================"
-
-          echo \
-            "Linked EngineSim symbols"
-
-          echo \
-            "================================"
-
-          nm \
-            "$EXECUTABLE" \
-            | grep \
-              -E \
-              'EngineSimApplication|SdlGpuRenderer|SdlAudioOutput' \
-            | head -n 30 \
-            || true
-
-
-          echo
-          echo \
-            "================================"
-
-          echo \
-            "SUCCESS"
-
-          echo \
-            "================================"
-
-          echo \
-            "Release ARM64 EngineSim iOS build complete."
-
+      # ============================================================
+      # IPA
+      # ============================================================
 
       - name: Package IPA
         run: |
-          rm -rf \
-            artifacts
+          rm -rf artifacts
 
-          mkdir -p \
-            artifacts/Payload
+          mkdir -p artifacts/Payload
 
           cp -R \
             "$APP_PATH" \
             artifacts/Payload/
 
-          cat \
-            > artifacts/BUILD_INFO.txt \
-            <<'EOF'
-
+          cat > artifacts/BUILD_INFO.txt <<'EOF'
           EngineSim iOS
           =============
-
-          Milestone:
-          Real EngineSim optimized build
 
           Platform:
           iPhoneOS
@@ -438,8 +294,8 @@ jobs:
           Configuration:
           Release
 
-          Compiler optimization:
-          enabled
+          Build mode:
+          Incremental cached Release
 
           Real EngineSim application:
           enabled
@@ -453,34 +309,23 @@ jobs:
           SDL GPU renderer:
           enabled
 
-          Metal shaders:
+          Metal:
           enabled
 
-          Touch input:
+          SDL audio:
           enabled
 
-          SDL audio output:
+          Touch:
           enabled
 
           App icon:
           enabled
 
-          iOS Metal compatibility path:
-          enabled
-
           Signing:
           disabled
-
-          Test targets:
-          - FPS
-          - audio continuity
-          - gauge stability
-          - simulation responsiveness
           EOF
 
-
-          cd \
-            artifacts
+          cd artifacts
 
           zip \
             -qr \
@@ -488,6 +333,10 @@ jobs:
             Payload \
             BUILD_INFO.txt
 
+
+      # ============================================================
+      # Upload
+      # ============================================================
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -497,4 +346,4 @@ jobs:
             artifacts/EngineSim-iOS-Release-unsigned.ipa
             artifacts/BUILD_INFO.txt
           if-no-files-found: error
-          compression-level: 1
+          compression-level: 0
