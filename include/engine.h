@@ -33,7 +33,9 @@ public:
         std::string name;
 
         double starterTorque =
-            units::torque(90.0, units::ft_lb);
+            units::torque(
+                90.0,
+                units::ft_lb);
 
         double starterSpeed =
             units::rpm(200);
@@ -50,7 +52,8 @@ public:
         double dynoHoldStep =
             units::rpm(100);
 
-        Throttle *throttle = nullptr;
+        Throttle *throttle =
+            nullptr;
 
         double initialSimulationFrequency =
             10000.0;
@@ -64,14 +67,15 @@ public:
         double initialJitter =
             0.5;
 
-        /*
-         * Community Edition simulation control.
-         *
-         * Older OES hardcoded this to 8 inside createSimulator().
-         * Keeping it on Engine::Parameters allows .mr files to select
-         * the intended fluid solver resolution.
-         */
-        int fluidSimulationSteps = 8;
+        int fluidSimulationSteps =
+            8;
+
+        double blockTemperature =
+            units::celcius(
+                90.0);
+
+        double heatTransferCoefficient =
+            100.0;
     };
 
 public:
@@ -187,6 +191,18 @@ public:
         return m_fluidSimulationSteps;
     }
 
+    inline double
+    getBlockTemperature() const
+    {
+        return m_blockTemperature;
+    }
+
+    inline double
+    getHeatTransferCoefficient() const
+    {
+        return m_heatTransferCoefficient;
+    }
+
     int getCylinderBankCount() const {
         return m_cylinderBankCount;
     }
@@ -272,25 +288,29 @@ public:
     double
     getSimulationFrequency() const
     {
-        return m_initialSimulationFrequency;
+        return
+            m_initialSimulationFrequency;
     }
 
     double
     getInitialHighFrequencyGain() const
     {
-        return m_initialHighFrequencyGain;
+        return
+            m_initialHighFrequencyGain;
     }
 
     double
     getInitialNoise() const
     {
-        return m_initialNoise;
+        return
+            m_initialNoise;
     }
 
     double
     getInitialJitter() const
     {
-        return m_initialJitter;
+        return
+            m_initialJitter;
     }
 
     virtual Simulator *
@@ -317,6 +337,7 @@ protected:
     double m_starterTorque;
     double m_starterSpeed;
     double m_redline;
+
     double m_dynoMinSpeed;
     double m_dynoMaxSpeed;
     double m_dynoHoldStep;
@@ -327,6 +348,9 @@ protected:
     double m_initialJitter;
 
     int m_fluidSimulationSteps;
+
+    double m_blockTemperature;
+    double m_heatTransferCoefficient;
 
     ExhaustSystem *m_exhaustSystems;
     int m_exhaustSystemCount;
@@ -343,4 +367,4 @@ protected:
     double m_displacement;
 };
 
-#endif /* ATG_ENGINE_SIM_ENGINE_H */
+#endif
