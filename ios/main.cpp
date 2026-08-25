@@ -5,6 +5,7 @@
 
 #include "ios_platform_sdl.h"
 
+#include "../include/engine_catalog.h"
 #include "../include/engine_sim_application.h"
 #include "../include/runtime_paths.h"
 #include "../include/sdl_audio_output.h"
@@ -13,29 +14,213 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
 
+namespace {
+
+namespace fs = std::filesystem;
+
+fs::path customEngineDirectory() {
+    const char *home =
+        std::getenv("HOME");
+
+    if (
+        home == nullptr
+        || home[0] == '\0')
+    {
+        return {};
+    }
+
+    return
+        fs::path(home)
+        / "Documents"
+        / "Custom Engines";
+}
+
+bool isMrFile(
+    const fs::path &path)
+{
+    std::string extension =
+        path.extension()
+            .string();
+
+    std::transform(
+        extension.begin(),
+        extension.end(),
+        extension.begin(),
+        [](unsigned char c) {
+            return static_cast<char>(
+                std::tolower(c));
+        });
+
+    return extension == ".mr";
+}
+
+/*
+ * Copy a document handed to us by iOS into the application's permanent
+ * custom-engine directory.
+ *
+ * If the file is already there, simply return the existing path.
+ */
+fs::path importEngineFile(
+    const fs::path &source)
+{
+    if (
+        source.empty()
+        || !isMrFile(source))
+    {
+        return {};
+    }
+
+    std::error_code error;
+
+    if (
+        !fs::exists(
+            source,
+            error)
+        || error)
+    {
+        std::fprintf(
+            stderr,
+            "Custom engine import: source does not exist: %s\n",
+            source.string().c_str());
+
+        return {};
+    }
+
+    const fs::path customRoot =
+        customEngineDirectory();
+
+    if (customRoot.empty()) {
+        return {};
+    }
+
+    fs::create_directories(
+        customRoot,
+        error);
+
+    if (error) {
+        std::fprintf(
+            stderr,
+            "Custom engine import: could not create directory: %s\n",
+            error.message().c_str());
+
+        return {};
+    }
+
+    /*
+     * If Files already handed us something inside Custom Engines,
+     * don't make another copy.
+     */
+    std::error_code canonicalError;
+
+    const fs::path canonicalSource =
+        fs::weakly_canonical(
+            source,
+            canonicalError);
+
+    canonicalError.clear();
+
+    const fs::path canonicalRoot =
+        fs::weakly_canonical(
+            customRoot,
+            canonicalError);
+
+    if (
+        !canonicalError
+        && canonicalSource
+            .string()
+            .rfind(
+                canonicalRoot.string(),
+                0)
+                == 0)
+    {
+        return canonicalSource;
+    }
+
+    fs::path destination =
+        customRoot
+        / source.filename();
+
+    /*
+     * Don't silently overwrite an existing engine with a different
+     * downloaded file.
+     */
+    if (
+        fs::exists(
+            destination,
+            error)
+        && !error)
+    {
+        const std::string stem =
+            destination
+                .stem()
+                .string();
+
+        const std::string extension =
+            destination
+                .extension()
+                .string();
+
+        int suffix =
+            2;
+
+        do {
+            destination =
+                customRoot
+                / (
+                    stem
+                    + " "
+                    + std::to_string(
+                        suffix)
+                    + extension);
+
+            ++suffix;
+
+            error.clear();
+        }
+        while (
+            fs::exists(
+                destination,
+                error)
+            && !error);
+    }
+
+    error.clear();
+
+    fs::copy_file(
+        source,
+        destination,
+        fs::copy_options::overwrite_existing,
+        error);
+
+    if (error) {
+        std::fprintf(
+            stderr,
+            "Custom engine import failed: %s\n",
+            error.message().c_str());
+
+        return {};
+    }
+
+    std::printf(
+        "Imported custom engine:\n%s\n",
+        destination.string().c_str());
+
+    return destination;
+}
+
+}
+
 /*
  * iOS-specific EngineSim application driver.
  *
- * Upstream EngineSimApplication::tick() deliberately limits the iOS
- * presentation rate to 60 FPS while idle and ~30 FPS while running.
- *
- * That made sense while we were fighting the original performance/audio
- * problems, but those bottlenecks are gone now.
- *
- * This driver keeps:
- *
- *   - physics tied to actual elapsed time
- *   - audio timing unchanged
- *   - simulation frequency unchanged
- *
- * while allowing presentation on every iOS display-link callback.
- *
- * On a ProMotion device that means up to 120 FPS.
- * On a 60 Hz device it naturally remains 60 FPS.
+ * Physics/audio remain tied to real elapsed time while rendering follows
+ * the native iOS display-link cadence, allowing ProMotion displays to run
+ * up to 120 Hz.
  */
 class EngineSimIOSApplication final
     : public EngineSimApplication
@@ -52,11 +237,6 @@ public:
                 m_platform->ticks();
         }
 
-        /*
-         * SDL's iOS callback lifecycle is display-link driven.
-         *
-         * Do not impose another software FPS limiter here.
-         */
         m_platform->pumpEvents();
 
         if (
@@ -70,16 +250,6 @@ public:
         const std::uint64_t now =
             m_platform->ticks();
 
-        /*
-         * Physics remains based on REAL elapsed time.
-         *
-         * At 120 Hz this will normally be about 8.3 ms.
-         * At 60 Hz it will normally be about 16.7 ms.
-         *
-         * Therefore 120 FPS does NOT double the amount of simulated
-         * engine time. It simply divides the same real-time simulation
-         * workload into smaller chunks.
-         */
         const float dt =
             std::min(
                 static_cast<float>(
@@ -144,11 +314,6 @@ public:
             m_engineView
             != nullptr)
         {
-            /*
-             * At ProMotion rates the gauge springs now receive smaller,
-             * more frequent time steps. Keep the old hitch protection,
-             * but do not artificially reduce their update rate.
-             */
             const float uiDt =
                 std::min(
                     dt,
@@ -159,16 +324,14 @@ public:
         }
 
         /*
-         * Engine selection is intentionally deferred until after the UI
-         * update finishes so the picker cannot destroy itself while its
-         * button event is still being dispatched.
+         * Selected/downloaded engines are loaded only after the current
+         * UI update has completed.
          */
         if (
             !m_pendingScriptPath.empty())
         {
-            const std::string
-                selectedScript =
-                    m_pendingScriptPath;
+            const std::string selectedScript =
+                m_pendingScriptPath;
 
             m_pendingScriptPath.clear();
 
@@ -179,16 +342,16 @@ public:
                 m_currentScriptPath =
                     selectedScript;
             }
+            else {
+                std::fprintf(
+                    stderr,
+                    "Engine script failed to load:\n%s\n",
+                    selectedScript.c_str());
+            }
         }
 
         /*
-         * THE PROMOTION CHANGE:
-         *
-         * Render once for every SDL iOS display-link iteration.
-         *
-         * There is deliberately no 8 ms timer here. The display itself is
-         * the clock, which gives us clean pacing at 120/90/80/60 Hz as iOS
-         * dynamically changes the ProMotion refresh rate.
+         * Render once for every iOS display-link callback.
          */
         renderScene();
 
@@ -202,11 +365,8 @@ public:
 struct EngineSimIOSState
 {
     IosPlatformSdl platform;
-
     SdlGpuRenderer renderer;
-
     SdlAudioOutput audioOutput;
-
     EngineSimIOSApplication application;
 
     bool applicationInitialized =
@@ -305,9 +465,6 @@ SDL_AppResult SDL_AppInit(
     *appstate =
         state;
 
-    /*
-     * Create the SDL-backed native iOS window.
-     */
     if (
         !state->platform.initialize(
             "Engine Simulator",
@@ -325,24 +482,27 @@ SDL_AppResult SDL_AppInit(
     }
 
     /*
-     * Resolve EngineSim runtime assets.
+     * Ensure Files has a destination ready immediately.
      */
+    {
+        std::error_code error;
+
+        fs::create_directories(
+            customEngineDirectory(),
+            error);
+    }
+
     const RuntimePaths paths =
         RuntimePaths::discover(
             state->platform
                 .applicationDirectory(),
             {});
 
-    printPathStatus(
-        paths);
+    printPathStatus(paths);
 
-    /*
-     * Initialize the real SDL GPU/Metal renderer.
-     */
-    const std::filesystem::path
-        shaderDirectory =
-            paths.assetDirectory
-            / "shaders";
+    const fs::path shaderDirectory =
+        paths.assetDirectory
+        / "shaders";
 
     if (
         !state->renderer.initialize(
@@ -365,9 +525,6 @@ SDL_AppResult SDL_AppInit(
     std::printf(
         "EngineSim SDL GPU renderer initialized.\n");
 
-    /*
-     * Initialize the actual Engine Simulator application.
-     */
     state->application.initialize(
         &state->platform,
         &state->renderer,
@@ -377,10 +534,13 @@ SDL_AppResult SDL_AppInit(
     state->applicationInitialized =
         true;
 
+    refreshEngineCatalog();
+
     std::printf(
         "========================================\n"
         " Real EngineSim application initialized\n"
         " ProMotion presentation enabled\n"
+        " Custom engine importing enabled\n"
         "========================================\n");
 
     return SDL_APP_CONTINUE;
@@ -400,6 +560,52 @@ SDL_AppResult SDL_AppEvent(
         || event == nullptr)
     {
         return SDL_APP_CONTINUE;
+    }
+
+    /*
+     * SDL translates an iOS document-open/drop operation into a DROP_FILE
+     * event. That gives us a real filesystem path to the document handed
+     * over by Files, Safari, Discord, etc.
+     */
+    if (
+        event->type
+        == SDL_EVENT_DROP_FILE
+        && event->drop.data
+        != nullptr)
+    {
+        const fs::path source(
+            event->drop.data);
+
+        std::printf(
+            "Received document from iOS:\n%s\n",
+            source.string().c_str());
+
+        const fs::path imported =
+            importEngineFile(
+                source);
+
+        if (!imported.empty()) {
+            /*
+             * Make it immediately visible in the picker.
+             */
+            refreshEngineCatalog();
+
+            /*
+             * And load it immediately.
+             *
+             * This uses the same deferred engine-switch path as tapping
+             * a picker button, keeping UI destruction safe.
+             */
+            if (
+                state
+                    ->applicationInitialized)
+            {
+                state
+                    ->application
+                    .requestEngineScript(
+                        imported.string());
+            }
+        }
     }
 
     state->platform.handleEvent(
@@ -431,11 +637,6 @@ SDL_AppResult SDL_AppIterate(
         return SDL_APP_FAILURE;
     }
 
-    /*
-     * SDL invokes this from its native iOS display-link callback.
-     *
-     * tickProMotion() renders exactly once per callback.
-     */
     const bool continueRunning =
         state
             ->application
