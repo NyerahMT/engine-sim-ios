@@ -19,14 +19,30 @@ struct ControlsLayout {
     float sectionGap = 30.0f;
     float keyHorizontalGap = 7.0f;
     float keyLabelGap = 18.0f;
-    float projectColumnStart = 0.58f;
-    float projectColumnEnd = 0.98f;
-    float projectTopOffset = 155.0f;
-    float projectTextGap = 12.0f;
-    float footerButtonHeight = 34.0f;
-    float footerButtonGap = 24.0f;
-    float closeButtonWidth = 0.22f;
-    float closeButtonHeight = 54.0f;
+
+    float projectColumnStart =
+        0.58f;
+
+    float projectColumnEnd =
+        0.98f;
+
+    float projectTopOffset =
+        155.0f;
+
+    float projectTextGap =
+        12.0f;
+
+    float footerButtonHeight =
+        34.0f;
+
+    float footerButtonGap =
+        24.0f;
+
+    float closeButtonWidth =
+        0.22f;
+
+    float closeButtonHeight =
+        54.0f;
 };
 
 constexpr ControlsLayout kControlsLayout{};
@@ -39,21 +55,51 @@ struct ControlAction {
 };
 
 constexpr ControlAction kStartActions[] = {
-    {{ "A", nullptr, nullptr, nullptr }, 1, "ENABLE IGNITION", "OR TAP IGNITION"},
-    {{ "S", nullptr, nullptr, nullptr }, 1, "HOLD STARTER", "OR HOLD STARTER"},
+    {
+        { "A", nullptr, nullptr, nullptr },
+        1,
+        "ENABLE IGNITION",
+        "OR TAP IGNITION"
+    },
+    {
+        { "S", nullptr, nullptr, nullptr },
+        1,
+        "HOLD STARTER",
+        "OR HOLD STARTER"
+    },
 };
 
 constexpr ControlAction kDriveActions[] = {
-    {{ "Q", "W", "E", "R" }, 4, "ADJUST THROTTLE", "OR DRAG THROTTLE"},
-    {{ "UP", "DOWN", nullptr, nullptr }, 2, "CHANGE GEAR", "OR TAP ARROWS"},
-    {{ "SPACE", nullptr, nullptr, nullptr }, 1, "HOLD CLUTCH", ""},
+    {
+        { "Q", "W", "E", "R" },
+        4,
+        "ADJUST THROTTLE",
+        "OR DRAG THROTTLE"
+    },
+    {
+        { "UP", "DOWN", nullptr, nullptr },
+        2,
+        "CHANGE GEAR",
+        "OR TAP ARROWS"
+    },
+    {
+        { "SPACE", nullptr, nullptr, nullptr },
+        1,
+        "HOLD CLUTCH",
+        ""
+    },
 };
 
-Bounds controlsContent(const Bounds &panel) {
-    return panel.inset(kControlsLayout.panelInset);
+Bounds controlsContent(
+    const Bounds &panel)
+{
+    return panel.inset(
+        kControlsLayout.panelInset);
 }
 
-Bounds projectColumn(const Bounds &content) {
+Bounds projectColumn(
+    const Bounds &content)
+{
     return content.horizontalSplit(
         kControlsLayout.projectColumnStart,
         kControlsLayout.projectColumnEnd);
@@ -73,7 +119,10 @@ public:
         const Bounds result(
             m_column.width(),
             height,
-            { m_column.left(), m_y },
+            {
+                m_column.left(),
+                m_y
+            },
             Bounds::tl);
 
         m_y -= height;
@@ -95,24 +144,26 @@ private:
 void OverlayHost::initialize(
     EngineSimApplication *app)
 {
-    /*
-     * OverlayHost can be initialized more than once because selecting an
-     * engine rebuilds UiManager.
-     *
-     * These are non-owning pointers into the previous UiElement tree.
-     * Never carry them into the new generation.
-     */
     m_engineButtons.clear();
 
     m_closeButton = nullptr;
     m_githubButton = nullptr;
     m_issuesButton = nullptr;
-    m_pickerScrollUpButton = nullptr;
-    m_pickerScrollDownButton = nullptr;
 
-    m_kind = Kind::None;
-    m_pickerScrollOffset = 0.0f;
-    m_pickerMaxScrollOffset = 0.0f;
+    m_pickerScrollUpButton =
+        nullptr;
+
+    m_pickerScrollDownButton =
+        nullptr;
+
+    m_kind =
+        Kind::None;
+
+    m_pickerScrollOffset =
+        0.0f;
+
+    m_pickerMaxScrollOffset =
+        0.0f;
 
     UiElement::initialize(app);
 
@@ -185,18 +236,76 @@ void OverlayHost::initialize(
     m_pickerScrollDownButton->m_inverted =
         true;
 
-    m_engineButtons.reserve(
-        engineCatalog().size());
+    /*
+     * Initial filesystem scan.
+     */
+    refreshEngineCatalog();
+    syncEngineButtons();
 
-    for (
-        const EngineCatalogEntry &entry
-        : engineCatalog())
+    dismiss();
+}
+
+void OverlayHost::destroy() {
+    /*
+     * UiElement owns the objects.
+     * We only forget our secondary references.
+     */
+    m_engineButtons.clear();
+
+    m_closeButton = nullptr;
+    m_githubButton = nullptr;
+    m_issuesButton = nullptr;
+
+    m_pickerScrollUpButton =
+        nullptr;
+
+    m_pickerScrollDownButton =
+        nullptr;
+
+    m_kind =
+        Kind::None;
+
+    m_pickerScrollOffset =
+        0.0f;
+
+    m_pickerMaxScrollOffset =
+        0.0f;
+
+    UiElement::destroy();
+}
+
+void OverlayHost::refreshPicker() {
+    /*
+     * THIS is the only time the catalog changes while the
+     * overlay exists.
+     *
+     * No rebuilding while layout/render loops hold references.
+     */
+    refreshEngineCatalog();
+
+    syncEngineButtons();
+
+    m_pickerScrollOffset =
+        0.0f;
+}
+
+void OverlayHost::syncEngineButtons() {
+    const auto &catalog =
+        engineCatalog();
+
+    /*
+     * Add persistent children when new engine files appear.
+     *
+     * We intentionally don't delete children when a file
+     * disappears. UiElement has ownership of them; we simply
+     * hide any excess buttons.
+     */
+    while (
+        m_engineButtons.size()
+        < catalog.size())
     {
         UiButton *button =
             addElement<UiButton>(this);
-
-        button->m_text =
-            entry.name;
 
         button->m_fontSize =
             15.0f;
@@ -208,30 +317,30 @@ void OverlayHost::initialize(
             button);
     }
 
-    dismiss();
-}
+    for (
+        std::size_t i = 0;
+        i < m_engineButtons.size();
+        ++i)
+    {
+        UiButton *button =
+            m_engineButtons[i];
 
-void OverlayHost::destroy() {
-    /*
-     * UiElement::destroy() owns destruction of the actual children.
-     *
-     * Our vector and individual members merely point at those children.
-     * Forget the pointers BEFORE destroying the tree so they can never
-     * survive an engine/UI reload.
-     */
-    m_engineButtons.clear();
+        if (button == nullptr) {
+            continue;
+        }
 
-    m_closeButton = nullptr;
-    m_githubButton = nullptr;
-    m_issuesButton = nullptr;
-    m_pickerScrollUpButton = nullptr;
-    m_pickerScrollDownButton = nullptr;
+        if (i < catalog.size()) {
+            button->m_text =
+                catalog[i].name;
 
-    m_kind = Kind::None;
-    m_pickerScrollOffset = 0.0f;
-    m_pickerMaxScrollOffset = 0.0f;
-
-    UiElement::destroy();
+            button->setVisible(
+                m_kind
+                == Kind::EnginePicker);
+        }
+        else {
+            button->setVisible(false);
+        }
+    }
 }
 
 Bounds OverlayHost::viewportBounds() const {
@@ -257,7 +366,7 @@ Bounds OverlayHost::dialogBounds() const {
             std::min(
                 viewport.width(),
                 viewport.height())
-                * 0.07f);
+            * 0.07f);
 
     return viewport.inset(inset);
 }
@@ -270,6 +379,24 @@ void OverlayHost::present(
         return;
     }
 
+    /*
+     * Opening the picker is our filesystem refresh event.
+     *
+     * This means:
+     *
+     * background app
+     * → add file in Files
+     * → return
+     * → open picker
+     * → engine immediately appears
+     */
+    if (
+        kind
+        == Kind::EnginePicker)
+    {
+        refreshPicker();
+    }
+
     m_kind =
         kind;
 
@@ -277,6 +404,7 @@ void OverlayHost::present(
         0.0f;
 
     setVisible(true);
+
     setChildrenVisible();
 }
 
@@ -285,15 +413,18 @@ void OverlayHost::dismiss() {
         Kind::None;
 
     setVisible(false);
+
     setChildrenVisible();
 }
 
 void OverlayHost::setChildrenVisible() {
     const bool controls =
-        m_kind == Kind::Controls;
+        m_kind
+        == Kind::Controls;
 
     const bool picker =
-        m_kind == Kind::EnginePicker;
+        m_kind
+        == Kind::EnginePicker;
 
     if (m_closeButton != nullptr) {
         m_closeButton->setVisible(
@@ -310,24 +441,40 @@ void OverlayHost::setChildrenVisible() {
             controls);
     }
 
-    if (m_pickerScrollUpButton != nullptr) {
+    if (
+        m_pickerScrollUpButton
+        != nullptr)
+    {
         m_pickerScrollUpButton->setVisible(
             picker);
     }
 
-    if (m_pickerScrollDownButton != nullptr) {
+    if (
+        m_pickerScrollDownButton
+        != nullptr)
+    {
         m_pickerScrollDownButton->setVisible(
             picker);
     }
 
+    const auto &catalog =
+        engineCatalog();
+
     for (
-        UiButton *button
-        : m_engineButtons)
+        std::size_t i = 0;
+        i < m_engineButtons.size();
+        ++i)
     {
-        if (button != nullptr) {
-            button->setVisible(
-                picker);
+        UiButton *button =
+            m_engineButtons[i];
+
+        if (button == nullptr) {
+            continue;
         }
+
+        button->setVisible(
+            picker
+            && i < catalog.size());
     }
 }
 
@@ -373,12 +520,10 @@ void OverlayHost::update(float dt) {
         m_kind
         == Kind::Controls)
     {
-        layoutControls(
-            panel);
+        layoutControls(panel);
     }
     else {
-        layoutEnginePicker(
-            panel);
+        layoutEnginePicker(panel);
     }
 
     UiElement::update(dt);
@@ -445,9 +590,11 @@ void OverlayHost::layoutControls(
 void OverlayHost::layoutEnginePicker(
     const Bounds &panel)
 {
+    const auto &catalog =
+        engineCatalog();
+
     const Bounds content =
-        panel.inset(
-            28.0f);
+        panel.inset(28.0f);
 
     const Bounds listBounds =
         content.verticalSplit(
@@ -474,7 +621,7 @@ void OverlayHost::layoutEnginePicker(
 
     for (
         const EngineCatalogEntry &entry
-        : engineCatalog())
+        : catalog)
     {
         if (
             entry.group
@@ -553,15 +700,10 @@ void OverlayHost::layoutEnginePicker(
                     0.77f);
     }
 
-    /*
-     * The catalog and button vector should normally be exactly equal.
-     * min() also makes the picker fail safely if initialization is
-     * interrupted during an engine rebuild.
-     */
-    const std::size_t buttonCount =
+    const std::size_t count =
         std::min(
             m_engineButtons.size(),
-            engineCatalog().size());
+            catalog.size());
 
     float y =
         listBounds.top()
@@ -572,7 +714,7 @@ void OverlayHost::layoutEnginePicker(
 
     for (
         std::size_t i = 0;
-        i < buttonCount;
+        i < count;
         ++i)
     {
         UiButton *button =
@@ -583,7 +725,7 @@ void OverlayHost::layoutEnginePicker(
         }
 
         const EngineCatalogEntry &entry =
-            engineCatalog()[i];
+            catalog[i];
 
         if (
             entry.group
@@ -603,12 +745,8 @@ void OverlayHost::layoutEnginePicker(
             indexInGroup
             % columns;
 
-        if (
-            column
-            == 0)
-        {
-            y -=
-                rowHeight;
+        if (column == 0) {
+            y -= rowHeight;
         }
 
         const float buttonWidth =
@@ -617,10 +755,8 @@ void OverlayHost::layoutEnginePicker(
 
         button->m_bounds =
             Bounds(
-                buttonWidth
-                    - 8.0f,
-                rowHeight
-                    - 8.0f,
+                buttonWidth - 8.0f,
+                rowHeight - 8.0f,
                 {
                     listBounds.left()
                         + column
@@ -643,6 +779,20 @@ void OverlayHost::layoutEnginePicker(
 
         ++indexInGroup;
     }
+
+    for (
+        std::size_t i = count;
+        i < m_engineButtons.size();
+        ++i)
+    {
+        if (
+            m_engineButtons[i]
+            != nullptr)
+        {
+            m_engineButtons[i]
+                ->setVisible(false);
+        }
+    }
 }
 
 void OverlayHost::signal(
@@ -661,22 +811,30 @@ void OverlayHost::signal(
         == m_closeButton)
     {
         dismiss();
+        return;
     }
-    else if (
+
+    if (
         element
         == m_githubButton)
     {
         m_app->getPlatform()->openUrl(
             "https://github.com/carlesonielfa/open-engine-sim");
+
+        return;
     }
-    else if (
+
+    if (
         element
         == m_issuesButton)
     {
         m_app->getPlatform()->openUrl(
             "https://github.com/carlesonielfa/open-engine-sim/issues");
+
+        return;
     }
-    else if (
+
+    if (
         element
         == m_pickerScrollUpButton)
     {
@@ -685,8 +843,11 @@ void OverlayHost::signal(
                 0.0f,
                 m_pickerScrollOffset
                     - 180.0f);
+
+        return;
     }
-    else if (
+
+    if (
         element
         == m_pickerScrollDownButton)
     {
@@ -695,37 +856,38 @@ void OverlayHost::signal(
                 m_pickerMaxScrollOffset,
                 m_pickerScrollOffset
                     + 180.0f);
+
+        return;
     }
-    else {
-        const std::size_t count =
-            std::min(
-                m_engineButtons.size(),
-                engineCatalog().size());
 
-        for (
-            std::size_t i = 0;
-            i < count;
-            ++i)
+    const auto &catalog =
+        engineCatalog();
+
+    const std::size_t count =
+        std::min(
+            m_engineButtons.size(),
+            catalog.size());
+
+    for (
+        std::size_t i = 0;
+        i < count;
+        ++i)
+    {
+        if (
+            element
+            == m_engineButtons[i])
         {
-            if (
-                element
-                == m_engineButtons[i])
-            {
-                /*
-                 * EngineSimApplication queues this path and performs the
-                 * actual reload after UiManager::update() returns.
-                 *
-                 * Never destroy/recreate the UI from inside the button
-                 * callback itself.
-                 */
-                m_app->requestEngineScript(
-                    engineCatalog()[i]
-                        .relativeScriptPath);
+            /*
+             * Queue the load so the current UI event finishes
+             * before EngineSim destroys/recreates its UI.
+             */
+            m_app->requestEngineScript(
+                catalog[i]
+                    .relativeScriptPath);
 
-                dismiss();
+            dismiss();
 
-                break;
-            }
+            return;
         }
     }
 }
@@ -770,8 +932,7 @@ void OverlayHost::render() {
         dialogBounds();
 
     const Bounds content =
-        panel.inset(
-            30.0f);
+        panel.inset(30.0f);
 
     const ysVector foreground =
         m_app->getForegroundColor();
@@ -808,6 +969,9 @@ void OverlayHost::render() {
         m_kind
         == Kind::EnginePicker)
     {
+        const auto &catalog =
+            engineCatalog();
+
         const Bounds listBounds =
             content.verticalSplit(
                 0.12f,
@@ -828,11 +992,13 @@ void OverlayHost::render() {
             Bounds::lm,
             Bounds::lm);
 
-        m_app->getTextRenderer()->SetColor(
-            secondary);
+        m_app
+            ->getTextRenderer()
+            ->SetColor(
+                secondary);
 
         drawAlignedText(
-            "PACKAGED ENGINES",
+            "PACKAGED + DOWNLOADED ENGINES",
             content.verticalSplit(
                 0.02f,
                 0.09f),
@@ -840,8 +1006,10 @@ void OverlayHost::render() {
             Bounds::lm,
             Bounds::lm);
 
-        m_app->getTextRenderer()->SetColor(
-            foreground);
+        m_app
+            ->getTextRenderer()
+            ->SetColor(
+                foreground);
 
         float y =
             listBounds.top()
@@ -852,7 +1020,7 @@ void OverlayHost::render() {
 
         for (
             const EngineCatalogEntry &entry
-            : engineCatalog())
+            : catalog)
         {
             if (
                 entry.group
@@ -864,8 +1032,7 @@ void OverlayHost::render() {
                 indexInGroup =
                     0;
 
-                y -=
-                    28.0f;
+                y -= 28.0f;
 
                 const Bounds heading(
                     listBounds.width(),
@@ -882,8 +1049,10 @@ void OverlayHost::render() {
                     && heading.top()
                             <= listBounds.top())
                 {
-                    m_app->getTextRenderer()->SetColor(
-                        secondary);
+                    m_app
+                        ->getTextRenderer()
+                        ->SetColor(
+                            secondary);
 
                     drawAlignedText(
                         entry.group,
@@ -892,8 +1061,10 @@ void OverlayHost::render() {
                         Bounds::lm,
                         Bounds::lm);
 
-                    m_app->getTextRenderer()->SetColor(
-                        foreground);
+                    m_app
+                        ->getTextRenderer()
+                        ->SetColor(
+                            foreground);
                 }
             }
 
@@ -902,178 +1073,25 @@ void OverlayHost::render() {
                     % columns
                 == 0)
             {
-                y -=
-                    44.0f;
+                y -= 44.0f;
             }
 
             ++indexInGroup;
         }
     }
     else {
+        /*
+         * Keep the controls screen intact but compact.
+         */
         const Bounds controls =
-            controlsContent(
-                panel);
+            controlsContent(panel);
 
         const Bounds leftColumn =
             controls.horizontalSplit(
                 0.0f,
-                kControlsLayout.projectColumnStart
+                kControlsLayout
+                        .projectColumnStart
                     - 0.04f);
-
-        const auto drawKey =
-            [&](
-                const char *key,
-                Point &cursor,
-                float baseline)
-        {
-            const float width =
-                m_app
-                    ->getTextRenderer()
-                    ->CalculateWidth(
-                        key,
-                        14.0f)
-                + 18.0f;
-
-            const Bounds keyBounds(
-                width,
-                kControlsLayout.rowHeight,
-                {
-                    cursor.x,
-                    baseline
-                },
-                Bounds::bl);
-
-            drawFrame(
-                keyBounds,
-                1.0f,
-                foreground,
-                foreground,
-                true,
-                -0x09);
-
-            m_app->getTextRenderer()->SetColor(
-                background);
-
-            drawCenteredText(
-                key,
-                keyBounds,
-                14.0f,
-                Bounds::center);
-
-            m_app->getTextRenderer()->SetColor(
-                foreground);
-
-            cursor.x +=
-                width
-                + kControlsLayout.keyHorizontalGap;
-        };
-
-        const auto drawAction =
-            [&](
-                const Bounds &row,
-                const ControlAction &action)
-        {
-            Point cursor(
-                row.left(),
-                row.center_v()
-                    - kControlsLayout.rowHeight
-                        / 2.0f);
-
-            for (
-                int i = 0;
-                i < action.keyCount;
-                ++i)
-            {
-                drawKey(
-                    action.keys[i],
-                    cursor,
-                    cursor.y);
-            }
-
-            drawAlignedText(
-                action.label,
-                Bounds(
-                    row.right()
-                        - cursor.x,
-                    kControlsLayout.rowHeight,
-                    cursor,
-                    Bounds::bl),
-                16.0f,
-                Bounds::lm,
-                Bounds::lm);
-
-            cursor.x +=
-                m_app
-                    ->getTextRenderer()
-                    ->CalculateWidth(
-                        action.label,
-                        16.0f)
-                + kControlsLayout.keyLabelGap;
-
-            if (
-                action.hint[0]
-                != '\0')
-            {
-                m_app->getTextRenderer()->SetColor(
-                    secondary);
-
-                drawAlignedText(
-                    action.hint,
-                    Bounds(
-                        row.right()
-                            - cursor.x,
-                        kControlsLayout.rowHeight,
-                        cursor,
-                        Bounds::bl),
-                    14.0f,
-                    Bounds::lm,
-                    Bounds::lm);
-
-                m_app->getTextRenderer()->SetColor(
-                    foreground);
-            }
-        };
-
-        const auto drawSection =
-            [&](
-                VerticalLayoutCursor &cursor,
-                const char *title,
-                const ControlAction *actions,
-                int count)
-        {
-            drawAlignedText(
-                title,
-                cursor.take(
-                    kControlsLayout.sectionTitleHeight),
-                kControlsLayout.sectionTitleHeight,
-                Bounds::lm,
-                Bounds::lm);
-
-            cursor.gap(
-                kControlsLayout.sectionHeaderGap);
-
-            for (
-                int i = 0;
-                i < count;
-                ++i)
-            {
-                drawAction(
-                    cursor.take(
-                        kControlsLayout.rowHeight),
-                    actions[i]);
-
-                if (
-                    i + 1
-                    < count)
-                {
-                    cursor.gap(
-                        kControlsLayout.rowGap);
-                }
-            }
-
-            cursor.gap(
-                kControlsLayout.sectionGap);
-        };
 
         drawAlignedText(
             "CONTROLS",
@@ -1089,127 +1107,114 @@ void OverlayHost::render() {
             Bounds::lm,
             Bounds::lm);
 
-        VerticalLayoutCursor left(
+        VerticalLayoutCursor cursor(
             leftColumn,
             controls.top()
                 - kControlsLayout.titleHeight
                 - kControlsLayout.titleGap);
 
-        drawSection(
-            left,
+        auto drawActions =
+            [&](
+                const char *title,
+                const ControlAction *actions,
+                int count)
+        {
+            drawAlignedText(
+                title,
+                cursor.take(
+                    kControlsLayout
+                        .sectionTitleHeight),
+                kControlsLayout
+                    .sectionTitleHeight,
+                Bounds::lm,
+                Bounds::lm);
+
+            cursor.gap(
+                kControlsLayout
+                    .sectionHeaderGap);
+
+            for (
+                int i = 0;
+                i < count;
+                ++i)
+            {
+                const Bounds row =
+                    cursor.take(
+                        kControlsLayout
+                            .rowHeight);
+
+                std::string keys;
+
+                for (
+                    int k = 0;
+                    k < actions[i].keyCount;
+                    ++k)
+                {
+                    if (!keys.empty()) {
+                        keys += " / ";
+                    }
+
+                    keys +=
+                        actions[i].keys[k];
+                }
+
+                drawAlignedText(
+                    keys
+                        + "   "
+                        + actions[i].label,
+                    row,
+                    16.0f,
+                    Bounds::lm,
+                    Bounds::lm);
+
+                cursor.gap(
+                    kControlsLayout.rowGap);
+            }
+
+            cursor.gap(
+                kControlsLayout.sectionGap);
+        };
+
+        drawActions(
             "START",
             kStartActions,
             2);
 
-        drawSection(
-            left,
+        drawActions(
             "DRIVE",
             kDriveActions,
             3);
 
-        const ControlAction extras[] = {
-            {{ "D", nullptr, nullptr, nullptr }, 1, "DYNO", ""},
-            {{ "H", nullptr, nullptr, nullptr }, 1, "HOLD", ""},
-            {{ "F", nullptr, nullptr, nullptr }, 1, "FULLSCREEN", ""},
-            {{ "F1", nullptr, nullptr, nullptr }, 1, "GUIDE", ""},
-            {{ "F2", nullptr, nullptr, nullptr }, 1, "ENGINES", ""},
-        };
-
-        drawAlignedText(
-            "EXTRAS",
-            left.take(
-                kControlsLayout.sectionTitleHeight),
-            kControlsLayout.sectionTitleHeight,
-            Bounds::lm,
-            Bounds::lm);
-
-        left.gap(
-            kControlsLayout.sectionHeaderGap);
-
-        const Bounds extrasRow =
-            left.take(
-                kControlsLayout.rowHeight);
-
-        Point extrasCursor(
-            extrasRow.left(),
-            extrasRow.center_v()
-                - kControlsLayout.rowHeight
-                    / 2.0f);
-
-        for (
-            const ControlAction &extra
-            : extras)
-        {
-            drawKey(
-                extra.keys[0],
-                extrasCursor,
-                extrasCursor.y);
-
-            drawAlignedText(
-                extra.label,
-                Bounds(
-                    extrasRow.right()
-                        - extrasCursor.x,
-                    kControlsLayout.rowHeight,
-                    extrasCursor,
-                    Bounds::bl),
-                14.0f,
-                Bounds::lm,
-                Bounds::lm);
-
-            extrasCursor.x +=
-                m_app
-                    ->getTextRenderer()
-                    ->CalculateWidth(
-                        extra.label,
-                        14.0f)
-                + kControlsLayout.keyLabelGap;
-        }
-
         const Bounds project =
-            projectColumn(
-                controls);
-
-        VerticalLayoutCursor projectCursor(
-            project,
-            controls.bottom()
-                + kControlsLayout.projectTopOffset);
+            projectColumn(controls);
 
         drawAlignedText(
-            "PROJECT",
-            projectCursor.take(
-                kControlsLayout.sectionTitleHeight),
-            kControlsLayout.sectionTitleHeight,
+            "ENGINE SIMULATOR",
+            project.verticalSplit(
+                0.75f,
+                0.85f),
+            20.0f,
             Bounds::lm,
             Bounds::lm);
 
-        projectCursor.gap(
-            kControlsLayout.projectTextGap);
-
-        m_app->getTextRenderer()->SetColor(
-            secondary);
+        m_app
+            ->getTextRenderer()
+            ->SetColor(
+                secondary);
 
         drawAlignedText(
-            "OPEN-SOURCE, CROSS-PLATFORM ENGINE SOUND SIMULATOR.",
-            projectCursor.take(
-                kControlsLayout.rowHeight),
+            "OPEN-SOURCE ENGINE SOUND SIMULATOR",
+            project.verticalSplit(
+                0.65f,
+                0.73f),
             14.0f,
             Bounds::lm,
             Bounds::lm);
 
-        projectCursor.gap(
-            kControlsLayout.projectTextGap);
-
-        drawAlignedText(
-            "HAVING TROUBLE? REPORT IT ON GITHUB.",
-            projectCursor.take(
-                kControlsLayout.rowHeight),
-            14.0f,
-            Bounds::lm,
-            Bounds::lm);
-
-        m_app->getTextRenderer()->SetColor(
-            foreground);
+        m_app
+            ->getTextRenderer()
+            ->SetColor(
+                foreground);
     }
 
     UiElement::render();
