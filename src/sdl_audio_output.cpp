@@ -9,48 +9,69 @@
 #include <chrono>
 #include <cstdio>
 
-bool SdlAudioOutput::start(Simulator *simulator) {
-    std::lock_guard<std::mutex> lock(m_lifecycleMutex);
+bool SdlAudioOutput::start(
+    Simulator *simulator)
+{
+    std::lock_guard<std::mutex>
+        lock(
+            m_lifecycleMutex);
+
     stopLocked();
 
-    if (simulator == nullptr) return false;
+    if (
+        simulator == nullptr)
+    {
+        return false;
+    }
 
-    /*
-     * EngineSim synthesizes at 44.1 kHz mono S16.
-     * Keep the stream in EngineSim's native format and let SDL
-     * perform any hardware conversion required by iOS.
-     */
-    const SDL_AudioSpec spec = {
+    const SDL_AudioSpec spec =
+    {
         SDL_AUDIO_S16,
         1,
         44100
     };
 
-    m_stream = SDL_OpenAudioDeviceStream(
-        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-        &spec,
-        nullptr,
-        nullptr);
+    m_stream =
+        SDL_OpenAudioDeviceStream(
+            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+            &spec,
+            nullptr,
+            nullptr);
 
-    if (m_stream == nullptr) return false;
+    if (
+        m_stream == nullptr)
+    {
+        return false;
+    }
 
-    m_simulator = simulator;
+    m_simulator =
+        simulator;
 
     m_diagnostics =
         SDL_GetHintBoolean(
             "ENGINE_SIM_AUDIO_DIAGNOSTICS",
             false);
 
-    m_lastDiagnosticTick = SDL_GetTicks();
-    m_pcmFrames = 0;
-    m_silenceFrames = 0;
-    m_peakQueuedBytes = 0;
+    m_lastDiagnosticTick =
+        SDL_GetTicks();
 
-    if (m_diagnostics) {
+    m_pcmFrames =
+        0;
+
+    m_silenceFrames =
+        0;
+
+    m_peakQueuedBytes =
+        0;
+
+    if (
+        m_diagnostics)
+    {
         SDL_AudioSpec source = {};
         SDL_AudioSpec destination = {};
 
-        if (SDL_GetAudioStreamFormat(
+        if (
+            SDL_GetAudioStreamFormat(
                 m_stream,
                 &source,
                 &destination))
@@ -65,12 +86,17 @@ bool SdlAudioOutput::start(Simulator *simulator) {
         }
     }
 
-    if (!SDL_ResumeAudioStreamDevice(m_stream)) {
+    if (
+        !SDL_ResumeAudioStreamDevice(
+            m_stream))
+    {
         stopLocked();
+
         return false;
     }
 
-    m_running = true;
+    m_running =
+        true;
 
     m_thread =
         std::thread(
@@ -81,14 +107,22 @@ bool SdlAudioOutput::start(Simulator *simulator) {
 }
 
 void SdlAudioOutput::audioThread() {
-    while (m_running) {
+    while (
+        m_running)
+    {
         fillStream();
 
-        if (m_diagnostics) {
+        if (
+            m_diagnostics)
+        {
             const std::uint64_t now =
                 SDL_GetTicks();
 
-            if (now - m_lastDiagnosticTick >= 1000) {
+            if (
+                now
+                    - m_lastDiagnosticTick
+                >= 1000)
+            {
                 const int queuedBytes =
                     SDL_GetAudioStreamQueued(
                         m_stream);
@@ -96,102 +130,124 @@ void SdlAudioOutput::audioThread() {
                 std::fprintf(
                     stderr,
                     "audio: pcm=%llu short=%llu input=%.3fs output=%.3fs stream=%.3fs peak-queue=%dB\n",
-                    static_cast<unsigned long long>(
-                        m_pcmFrames),
-                    static_cast<unsigned long long>(
-                        m_silenceFrames),
+                    static_cast<
+                        unsigned long long>(
+                            m_pcmFrames),
+                    static_cast<
+                        unsigned long long>(
+                            m_silenceFrames),
                     m_simulator != nullptr
-                        ? m_simulator->getSynthesizerInputLatency()
+                        ? m_simulator
+                            ->getSynthesizerInputLatency()
                         : 0.0,
                     m_simulator != nullptr
-                        ? m_simulator->getSynthesizerOutputLatency()
+                        ? m_simulator
+                            ->getSynthesizerOutputLatency()
                         : 0.0,
-                    std::max(0, queuedBytes)
-                        / (44100.0 * sizeof(std::int16_t)),
+                    std::max(
+                        0,
+                        queuedBytes)
+                        / (
+                            44100.0
+                            * sizeof(
+                                std::int16_t)),
                     m_peakQueuedBytes);
 
-                m_pcmFrames = 0;
-                m_silenceFrames = 0;
-                m_peakQueuedBytes = 0;
-                m_lastDiagnosticTick = now;
+                m_pcmFrames =
+                    0;
+
+                m_silenceFrames =
+                    0;
+
+                m_peakQueuedBytes =
+                    0;
+
+                m_lastDiagnosticTick =
+                    now;
             }
         }
 
-        /*
-         * Fast polling is intentional.
-         *
-         * This worker is tiny and lets us refill EngineSim's
-         * 1024-sample reservoir quickly without requiring a large
-         * latency-inducing device queue.
-         */
         std::this_thread::sleep_for(
-            std::chrono::milliseconds(1));
+            std::chrono::milliseconds(
+                1));
     }
 }
 
 void SdlAudioOutput::fillStream() {
-    if (m_stream == nullptr || m_simulator == nullptr) {
+    if (
+        m_stream == nullptr
+        || m_simulator == nullptr)
+    {
         return;
     }
 
     /*
-     * EngineSim's native synth currently keeps roughly
-     * 1024 rendered samples available.
+     * Match the Synthesizer's 4096-sample native
+     * output reservoir.
      *
-     * Use smaller reads so we don't drain the whole producer
-     * reservoir in one shot.
+     * 4096 @ 44.1 kHz ≈ 92.9 ms.
      *
-     * 256 frames = ~5.8 ms.
+     * Keep reads smaller than the full reservoir so
+     * the producer and consumer can interleave smoothly.
      */
-    constexpr int chunkFrames = 256;
+    constexpr int chunkFrames =
+        512;
 
-    /*
-     * Maintain approximately 23 ms of SDL-side lead.
-     *
-     * Combined with smaller reads this keeps latency low while
-     * giving the synth thread several opportunities to refill.
-     */
-    constexpr int targetFrames = 1024;
+    constexpr int targetFrames =
+        4096;
 
     constexpr int targetBytes =
         targetFrames
         * static_cast<int>(
-            sizeof(std::int16_t));
+            sizeof(
+                std::int16_t));
 
     int queuedBytes =
         SDL_GetAudioStreamQueued(
             m_stream);
 
-    if (queuedBytes < 0) {
+    if (
+        queuedBytes
+        < 0)
+    {
         return;
     }
 
     while (
         m_running
-        && queuedBytes < targetBytes)
+        && queuedBytes
+            < targetBytes)
     {
         std::array<
             std::int16_t,
-            chunkFrames> samples{};
+            chunkFrames>
+            samples{};
 
         const int missingFrames =
-            (targetBytes - queuedBytes)
+            (
+                targetBytes
+                - queuedBytes)
             / static_cast<int>(
-                sizeof(std::int16_t));
+                sizeof(
+                    std::int16_t));
 
         const int requestedFrames =
             std::min(
                 chunkFrames,
                 missingFrames);
 
-        if (requestedFrames <= 0) {
+        if (
+            requestedFrames
+            <= 0)
+        {
             break;
         }
 
         const int producedFrames =
-            m_simulator->readAudioOutput(
-                requestedFrames,
-                samples.data());
+            m_simulator
+                ->readAudioOutput(
+                    requestedFrames,
+                    samples.data());
 
         const int validFrames =
             std::clamp(
@@ -199,41 +255,36 @@ void SdlAudioOutput::fillStream() {
                 0,
                 requestedFrames);
 
-        m_pcmFrames += validFrames;
+        m_pcmFrames +=
+            validFrames;
 
-        /*
-         * Keep this diagnostic counter, but unlike the old version
-         * DO NOT send EngineSim's zero-filled tail to SDL.
-         */
         m_silenceFrames +=
             requestedFrames
             - validFrames;
 
-        if (validFrames <= 0) {
-            /*
-             * Producer is temporarily dry.
-             *
-             * Do not manufacture silence and do not hammer the
-             * synth while holding this loop. Return to our 1 ms
-             * worker cadence and give it time to produce PCM.
-             */
+        /*
+         * Never queue EngineSim's zero-filled tail.
+         *
+         * A temporary synth underrun is better handled
+         * by returning and letting the rendering worker
+         * refill than by inserting a hard transition
+         * from PCM to digital zero.
+         */
+        if (
+            validFrames
+            <= 0)
+        {
             break;
         }
 
-        /*
-         * This is the important change:
-         *
-         * readAudioOutput() zero-fills everything after
-         * validFrames on a short read.
-         *
-         * Queue ONLY actual generated EngineSim PCM.
-         */
         const int validBytes =
             validFrames
             * static_cast<int>(
-                sizeof(std::int16_t));
+                sizeof(
+                    std::int16_t));
 
-        if (!SDL_PutAudioStreamData(
+        if (
+            !SDL_PutAudioStreamData(
                 m_stream,
                 samples.data(),
                 validBytes))
@@ -249,11 +300,10 @@ void SdlAudioOutput::fillStream() {
                 m_peakQueuedBytes,
                 queuedBytes);
 
-        /*
-         * A short read means we've caught up with the synthesizer.
-         * Don't immediately request another block.
-         */
-        if (validFrames < requestedFrames) {
+        if (
+            validFrames
+            < requestedFrames)
+        {
             break;
         }
     }
@@ -273,24 +323,33 @@ bool SdlAudioOutput::loadImpulseResponse(
 }
 
 void SdlAudioOutput::stop() {
-    std::lock_guard<std::mutex> lock(
-        m_lifecycleMutex);
+    std::lock_guard<std::mutex>
+        lock(
+            m_lifecycleMutex);
 
     stopLocked();
 }
 
 void SdlAudioOutput::stopLocked() {
-    m_running = false;
+    m_running =
+        false;
 
-    if (m_thread.joinable()) {
+    if (
+        m_thread.joinable())
+    {
         m_thread.join();
     }
 
-    if (m_stream != nullptr) {
+    if (
+        m_stream != nullptr)
+    {
         SDL_DestroyAudioStream(
             m_stream);
     }
 
-    m_stream = nullptr;
-    m_simulator = nullptr;
+    m_stream =
+        nullptr;
+
+    m_simulator =
+        nullptr;
 }
