@@ -13,105 +13,64 @@
 #include <cassert>
 
 CombustionChamber::CombustionChamber() {
-    m_crankcasePressure =
-        0.0;
+    m_crankcasePressure = 0.0;
 
     m_blockTemperature =
-        units::celcius(
-            90.0);
+        units::celcius(90.0);
 
     m_heatTransferCoefficient =
         100.0;
 
-    m_piston =
-        nullptr;
+    m_piston = nullptr;
+    m_head = nullptr;
+    m_engine = nullptr;
 
-    m_head =
-        nullptr;
+    m_pistonSpeed = nullptr;
+    m_pressure = nullptr;
 
-    m_engine =
-        nullptr;
+    m_lit = false;
+    m_litLastFrame = false;
 
-    m_pistonSpeed =
-        nullptr;
-
-    m_pressure =
-        nullptr;
-
-    m_lit =
-        false;
-
-    m_litLastFrame =
-        false;
-
-    m_peakTemperature =
-        0;
+    m_peakTemperature = 0;
 
     m_meanPistonSpeedToTurbulence =
         nullptr;
 
-    m_nBurntFuel =
-        0;
+    m_nBurntFuel = 0;
 
-    m_manifoldToRunnerFlowRate =
-        0;
+    m_manifoldToRunnerFlowRate = 0;
+    m_primaryToCollectorFlowRate = 0;
 
-    m_primaryToCollectorFlowRate =
-        0;
+    m_cylinderWidthApproximation = 0;
+    m_cylinderCrossSectionSurfaceArea = 0;
 
-    m_cylinderWidthApproximation =
-        0;
+    m_lastTimestepTotalExhaustFlow = 0;
+    m_lastTimestepTotalIntakeFlow = 0;
 
-    m_cylinderCrossSectionSurfaceArea =
-        0;
+    m_exhaustFlow = 0;
+    m_exhaustFlowRate = 0;
+    m_intakeFlowRate = 0;
 
-    m_lastTimestepTotalExhaustFlow =
-        0;
-
-    m_lastTimestepTotalIntakeFlow =
-        0;
-
-    m_exhaustFlow =
-        0;
-
-    m_exhaustFlowRate =
-        0;
-
-    m_intakeFlowRate =
-        0;
-
-    m_fuel =
-        nullptr;
+    m_fuel = nullptr;
 }
 
 CombustionChamber::~CombustionChamber() {
-    assert(
-        m_pistonSpeed
-        == nullptr);
-
-    assert(
-        m_pressure
-        == nullptr);
+    assert(m_pistonSpeed == nullptr);
+    assert(m_pressure == nullptr);
 }
 
 void CombustionChamber::initialize(
     const Parameters &params)
 {
-    m_piston =
-        params.Piston;
-
-    m_head =
-        params.Head;
-
-    m_fuel =
-        params.Fuel;
+    m_piston = params.Piston;
+    m_head = params.Head;
+    m_fuel = params.Fuel;
 
     m_crankcasePressure =
         params.CrankcasePressure;
 
     m_meanPistonSpeedToTurbulence =
-        params
-            .MeanPistonSpeedToTurbulence;
+        params.MeanPistonSpeedToTurbulence;
 
     m_blockTemperature =
         params.BlockTemperature;
@@ -119,51 +78,38 @@ void CombustionChamber::initialize(
     m_heatTransferCoefficient =
         params.HeatTransferCoefficient;
 
-    if (
-        m_heatTransferCoefficient
-        < 0.0)
-    {
-        m_heatTransferCoefficient =
-            0.0;
+    if (m_heatTransferCoefficient < 0.0) {
+        m_heatTransferCoefficient = 0.0;
     }
 
     m_pistonSpeed =
-        new double[
-            StateSamples];
+        new double[StateSamples];
 
     m_pressure =
-        new double[
-            StateSamples];
+        new double[StateSamples];
 
     for (
         int i = 0;
         i < StateSamples;
         ++i)
     {
-        m_pistonSpeed[i] =
-            0;
-
-        m_pressure[i] =
-            0;
+        m_pistonSpeed[i] = 0;
+        m_pressure[i] = 0;
     }
 
     Intake *intake =
         m_head->getIntake(
-            m_piston
-                ->getCylinderIndex());
+            m_piston->getCylinderIndex());
 
     ExhaustSystem *exhaust =
         m_head->getExhaustSystem(
-            m_piston
-                ->getCylinderIndex());
+            m_piston->getCylinderIndex());
 
     m_manifoldToRunnerFlowRate =
-        intake
-            ->getRunnerFlowRate();
+        intake->getRunnerFlowRate();
 
     m_primaryToCollectorFlowRate =
-        exhaust
-            ->getPrimaryFlowRate();
+        exhaust->getPrimaryFlowRate();
 
     const double bore_r =
         m_head
@@ -199,16 +145,14 @@ void CombustionChamber::initialize(
             intakeRunnerCrossSection);
 
     const double manifoldRunnerLength =
-        intake
-            ->getRunnerLength();
+        intake->getRunnerLength();
 
     const double manifoldRunnerVolume =
         intakeRunnerCrossSection
         * manifoldRunnerLength;
 
     const double totalIntakeRunnerVolume =
-        m_head
-            ->getIntakeRunnerVolume()
+        m_head->getIntakeRunnerVolume()
         + manifoldRunnerVolume;
 
     const double overallIntakeRunnerLength =
@@ -220,8 +164,7 @@ void CombustionChamber::initialize(
             1.0,
             units::atm),
         totalIntakeRunnerVolume,
-        units::celcius(
-            25.0));
+        units::celcius(25.0));
 
     m_intakeRunnerAndManifold.setGeometry(
         overallIntakeRunnerLength,
@@ -238,20 +181,16 @@ void CombustionChamber::initialize(
             exhaustRunnerCrossSection);
 
     const double exhaustTubeLength =
-        exhaust
-            ->getPrimaryTubeLength()
-        + m_head
-            ->getHeaderPrimaryLength(
-                m_piston
-                    ->getCylinderIndex());
+        exhaust->getPrimaryTubeLength()
+        + m_head->getHeaderPrimaryLength(
+            m_piston->getCylinderIndex());
 
     const double exhaustTubeVolume =
         exhaustRunnerCrossSection
         * exhaustTubeLength;
 
     const double totalExhaustRunnerVolume =
-        m_head
-            ->getExhaustRunnerVolume()
+        m_head->getExhaustRunnerVolume()
         + exhaustTubeVolume;
 
     const double overallExhaustRunnerLength =
@@ -263,8 +202,7 @@ void CombustionChamber::initialize(
             1.0,
             units::atm),
         totalExhaustRunnerVolume,
-        units::celcius(
-            25.0));
+        units::celcius(25.0));
 
     m_exhaustRunnerAndPrimary.setGeometry(
         overallExhaustRunnerLength,
@@ -274,41 +212,27 @@ void CombustionChamber::initialize(
 }
 
 void CombustionChamber::destroy() {
-    if (
-        m_pistonSpeed
-        != nullptr)
-    {
-        delete[]
-            m_pistonSpeed;
+    if (m_pistonSpeed != nullptr) {
+        delete[] m_pistonSpeed;
     }
 
-    if (
-        m_pressure
-        != nullptr)
-    {
-        delete[]
-            m_pressure;
+    if (m_pressure != nullptr) {
+        delete[] m_pressure;
     }
 
-    m_pistonSpeed =
-        nullptr;
-
-    m_pressure =
-        nullptr;
+    m_pistonSpeed = nullptr;
+    m_pressure = nullptr;
 }
 
 double CombustionChamber::getVolume() const {
     const double combustionPortVolume =
-        m_head
-            ->getCombustionChamberVolume();
+        m_head->getCombustionChamberVolume();
 
     const CylinderBank *bank =
-        m_head
-            ->getCylinderBank();
+        m_head->getCylinderBank();
 
     const double area =
-        bank
-            ->boreSurfaceArea();
+        bank->boreSurfaceArea();
 
     const double s =
         m_piston->relativeX()
@@ -321,23 +245,18 @@ double CombustionChamber::getVolume() const {
         * (
             bank->getDeckHeight()
             - s
-            - m_piston
-                ->getCompressionHeight()
+            - m_piston->getCompressionHeight()
         );
 
     return
         sweep
         + combustionPortVolume
-        - m_piston
-            ->getDisplacement();
+        - m_piston->getDisplacement();
 }
 
-double
-CombustionChamber::pistonSpeed() const
-{
+double CombustionChamber::pistonSpeed() const {
     const CylinderBank *bank =
-        m_head
-            ->getCylinderBank();
+        m_head->getCylinderBank();
 
     return
         m_piston->m_body.v_x
@@ -350,20 +269,17 @@ double
 CombustionChamber::
 calculateMeanPistonSpeed() const
 {
-    double avg =
-        0;
+    double avg = 0;
 
     for (
         int i = 0;
         i < StateSamples;
         ++i)
     {
-        avg +=
-            m_pistonSpeed[i];
+        avg += m_pistonSpeed[i];
     }
 
-    avg /=
-        StateSamples;
+    avg /= StateSamples;
 
     return avg;
 }
@@ -372,8 +288,7 @@ double
 CombustionChamber::
 calculateFiringPressure() const
 {
-    double firingPressure =
-        0;
+    double firingPressure = 0;
 
     for (
         int i = 0;
@@ -408,51 +323,35 @@ popLitLastFrame()
 void CombustionChamber::ignite() {
     if (!m_lit) {
         if (
-            m_system
-                .mix()
-                .p_fuel
+            m_system.mix().p_fuel
             == 0)
         {
             return;
         }
 
         const double afr =
-            m_system
-                .mix()
-                .p_o2
-            / m_system
-                .mix()
-                .p_fuel;
+            m_system.mix().p_o2
+            / m_system.mix().p_fuel;
 
         const double equivalenceRatio =
             afr
             / m_fuel
                 ->getMolecularAfr();
 
-        if (
-            equivalenceRatio
-            < 0.5)
-        {
+        if (equivalenceRatio < 0.5) {
             return;
         }
-        else if (
-            equivalenceRatio
-            > 1.9)
-        {
+        else if (equivalenceRatio > 1.9) {
             return;
         }
 
         const double idealInert =
-            m_system
-                .mix()
-                .p_o2
+            m_system.mix().p_o2
             / 0.7;
 
         const double dilution =
             (
-                m_system
-                    .mix()
-                    .p_inert
+                m_system.mix().p_inert
                 / idealInert
             )
             - 1;
@@ -460,29 +359,20 @@ void CombustionChamber::ignite() {
         m_flameEvent.lastVolume =
             getVolume();
 
-        m_flameEvent.travel_x =
-            0;
-
-        m_flameEvent.travel_y =
-            0;
-
-        m_flameEvent.lit_n =
-            0;
+        m_flameEvent.travel_x = 0;
+        m_flameEvent.travel_y = 0;
+        m_flameEvent.lit_n = 0;
 
         m_flameEvent.total_n =
             m_system.n();
 
-        m_flameEvent.percentageLit =
-            0;
+        m_flameEvent.percentageLit = 0;
 
         m_flameEvent.globalMix =
             m_system.mix();
 
-        m_lit =
-            true;
-
-        m_litLastFrame =
-            true;
+        m_lit = true;
+        m_litLastFrame = true;
 
         const double randomness =
             m_fuel
@@ -524,10 +414,7 @@ void CombustionChamber::ignite() {
         const double rand_s =
             lowEfficiencyAttenuation
             * (
-                (
-                    1
-                    - randomness
-                )
+                (1 - randomness)
                 + randomness
                     * (
                         static_cast<double>(
@@ -570,16 +457,14 @@ void CombustionChamber::update(
     updateCycleStates();
 
     m_intakeFlowRate =
-        m_head
-            ->intakeFlowRate(
-                m_piston
-                    ->getCylinderIndex());
+        m_head->intakeFlowRate(
+            m_piston
+                ->getCylinderIndex());
 
     m_exhaustFlowRate =
-        m_head
-            ->exhaustFlowRate(
-                m_piston
-                    ->getCylinderIndex());
+        m_head->exhaustFlowRate(
+            m_piston
+                ->getCylinderIndex());
 }
 
 void CombustionChamber::flow(
@@ -609,17 +494,6 @@ void CombustionChamber::flow(
         + m_cylinderCrossSectionSurfaceArea
             * 2;
 
-    /*
-     * Community Edition thermal model.
-     *
-     * Old OES:
-     *
-     *   dT = 90 C - gas temperature
-     *   Q  = dT * area * 100 * dt
-     *
-     * The same physical path is retained, but both constants now come
-     * from the engine script.
-     */
     const double dT =
         m_blockTemperature
         - m_system.temperature();
@@ -631,32 +505,22 @@ void CombustionChamber::flow(
         * dt);
 
     m_system.flow(
-        m_piston
-            ->getBlowbyK(),
+        m_piston->getBlowbyK(),
         dt,
         m_crankcasePressure,
-        units::celcius(
-            25.0));
+        units::celcius(25.0));
 
     Intake *intake =
-        m_head
-            ->getIntake(
-                m_piston
-                    ->getCylinderIndex());
+        m_head->getIntake(
+            m_piston
+                ->getCylinderIndex());
 
     ExhaustSystem *exhaust =
-        m_head
-            ->getExhaustSystem(
-                m_piston
-                    ->getCylinderIndex());
+        m_head->getExhaustSystem(
+            m_piston
+                ->getCylinderIndex());
 
-    const double start_n =
-        m_system.n();
-
-    (void)start_n;
-
-    GasSystem::FlowParameters
-        flowParams;
+    GasSystem::FlowParameters flowParams;
 
     flowParams.dt =
         dt;
@@ -759,8 +623,7 @@ void CombustionChamber::flow(
         &m_exhaustRunnerAndPrimary;
 
     flowParams.system_1 =
-        exhaust
-            ->getSystem();
+        exhaust->getSystem();
 
     GasSystem::flow(
         flowParams);
@@ -768,8 +631,7 @@ void CombustionChamber::flow(
     m_intakeRunnerAndManifold
         .updateVelocity(
             dt,
-            intake
-                ->getVelocityDecay());
+            intake->getVelocityDecay());
 
     m_system
         .updateVelocity(
@@ -779,17 +641,14 @@ void CombustionChamber::flow(
     m_exhaustRunnerAndPrimary
         .updateVelocity(
             dt,
-            exhaust
-                ->getVelocityDecay());
+            exhaust->getVelocityDecay());
 
     if (
-        std::abs(
-            intakeFlow)
+        std::abs(intakeFlow)
             > 1E-9
         && m_lit)
     {
-        m_lit =
-            false;
+        m_lit = false;
     }
 
     m_exhaustFlow =
@@ -807,32 +666,26 @@ void CombustionChamber::flow(
                 ->getCylinderBank();
 
         const double totalTravel_x =
-            bank
-                ->getBore()
+            bank->getBore()
             / 2;
 
         const double totalTravel_y =
             volume
-            / bank
-                ->boreSurfaceArea();
+            / bank->boreSurfaceArea();
 
         const double expansion =
             volume
-            / m_flameEvent
-                .lastVolume;
+            / m_flameEvent.lastVolume;
 
         const double lastTravel_x =
-            m_flameEvent
-                .travel_x;
+            m_flameEvent.travel_x;
 
         const double lastTravel_y =
-            m_flameEvent
-                .travel_y
+            m_flameEvent.travel_y
             * expansion;
 
         const double flameSpeed =
-            m_flameEvent
-                .flameSpeed;
+            m_flameEvent.flameSpeed;
 
         m_flameEvent.travel_x =
             std::fmin(
@@ -850,11 +703,9 @@ void CombustionChamber::flow(
 
         if (
             lastTravel_x
-                    < m_flameEvent
-                        .travel_x
+                    < m_flameEvent.travel_x
             || lastTravel_y
-                    < m_flameEvent
-                        .travel_y)
+                    < m_flameEvent.travel_y)
         {
             const double burnedVolume =
                 m_flameEvent.travel_x
@@ -882,10 +733,8 @@ void CombustionChamber::flow(
             const double fuelBurned =
                 m_system.react(
                     n
-                        * m_flameEvent
-                            .efficiency,
-                    m_flameEvent
-                        .globalMix);
+                        * m_flameEvent.efficiency,
+                    m_flameEvent.globalMix);
 
             const double massFuelBurned =
                 fuelBurned
@@ -908,8 +757,7 @@ void CombustionChamber::flow(
                 massFuelBurned;
         }
         else {
-            m_lit =
-                false;
+            m_lit = false;
         }
 
         m_flameEvent.lastVolume =
@@ -921,25 +769,16 @@ double
 CombustionChamber::lastEventAfr() const
 {
     const double totalFuel =
-        m_flameEvent
-            .globalMix
-            .p_fuel
-        * m_flameEvent
-            .total_n;
+        m_flameEvent.globalMix.p_fuel
+        * m_flameEvent.total_n;
 
     const double totalOxygen =
-        m_flameEvent
-            .globalMix
-            .p_o2
-        * m_flameEvent
-            .total_n;
+        m_flameEvent.globalMix.p_o2
+        * m_flameEvent.total_n;
 
     const double totalInert =
-        m_flameEvent
-            .globalMix
-            .p_inert
-        * m_flameEvent
-            .total_n;
+        m_flameEvent.globalMix.p_inert
+        * m_flameEvent.total_n;
 
     constexpr double octaneMolarMass =
         units::mass(
@@ -956,10 +795,7 @@ CombustionChamber::lastEventAfr() const
             28.014,
             units::g);
 
-    if (
-        totalFuel
-        == 0)
-    {
+    if (totalFuel == 0) {
         return 0;
     }
 
@@ -986,8 +822,7 @@ calculateFrictionForce(
             ->calculateCylinderWallForce();
 
     const double F_coul =
-        m_frictionModel
-            .frictionCoeff
+        m_frictionModel.frictionCoeff
         * cylinderWallForce;
 
     const double v_st =
@@ -1005,8 +840,7 @@ calculateFrictionForce(
             .breakawayFriction;
 
     const double v =
-        std::abs(
-            v_s);
+        std::abs(v_s);
 
     const double F_0 =
         constants::root_2
@@ -1054,10 +888,8 @@ updateCycleStates()
             ->getCycleAngle();
 
     if (
-        std::isnan(
-            crankAngle)
-        || std::isinf(
-            crankAngle))
+        std::isnan(crankAngle)
+        || std::isinf(crankAngle))
     {
         crankAngle =
             0.0;
@@ -1103,15 +935,11 @@ void CombustionChamber::apply(
 
     const double v_x =
         system->v_x[
-            m_piston
-                ->m_body
-                .index];
+            m_piston->m_body.index];
 
     const double v_y =
         system->v_y[
-            m_piston
-                ->m_body
-                .index];
+            m_piston->m_body.index];
 
     const double v_s =
         v_x
@@ -1128,10 +956,8 @@ void CombustionChamber::apply(
         * pressureDifferential;
 
     if (
-        std::isnan(
-            force)
-        || std::isinf(
-            force))
+        std::isnan(force)
+        || std::isinf(force))
     {
         assert(false);
     }
@@ -1141,8 +967,7 @@ void CombustionChamber::apply(
 
     const double abs_v_s =
         std::fmin(
-            std::abs(
-                v_s),
+            std::abs(v_s),
             limit);
 
     const double attenuation =
@@ -1150,8 +975,7 @@ void CombustionChamber::apply(
         / limit;
 
     const double F =
-        calculateFrictionForce(
-            v_s)
+        calculateFrictionForce(v_s)
         * attenuation;
 
     const double F_fric =
@@ -1174,9 +998,7 @@ void CombustionChamber::apply(
             + F_fric
         )
             * bank->getDy(),
-        m_piston
-            ->m_body
-            .index);
+        m_piston->m_body.index);
 }
 
 double
@@ -1188,14 +1010,10 @@ getFrictionForce() const
             ->getCylinderBank();
 
     const double v_x =
-        m_piston
-            ->m_body
-            .v_x;
+        m_piston->m_body.v_x;
 
     const double v_y =
-        m_piston
-            ->m_body
-            .v_y;
+        m_piston->m_body.v_y;
 
     const double v_s =
         v_x
