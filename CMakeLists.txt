@@ -43,6 +43,7 @@ endif()
 
 set(ENGINE_SIM_CORE_SOURCES
     src/camshaft.cpp
+    src/engine_sim_clutch_constraint.cpp
     src/combustion_chamber.cpp
     src/connecting_rod.cpp
     src/convolution_filter.cpp
