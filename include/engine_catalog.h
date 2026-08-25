@@ -10,6 +10,21 @@ struct EngineCatalogEntry {
     std::string relativeScriptPath;
 };
 
+/*
+ * Rebuild the catalog.
+ *
+ * On iOS this also rescans:
+ *
+ * Documents/Custom Engines
+ */
+void refreshEngineCatalog();
+
+/*
+ * Return the currently cached catalog.
+ *
+ * This function NEVER rebuilds the vector, so references remain
+ * stable until refreshEngineCatalog() is explicitly called.
+ */
 const std::vector<EngineCatalogEntry> &engineCatalog();
 
-#endif /* ATG_ENGINE_SIM_ENGINE_CATALOG_H */
+#endif
