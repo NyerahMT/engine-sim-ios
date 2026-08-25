@@ -5,8 +5,75 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <string>
 
 namespace {
+
+std::string audioDiagnosticsPath() {
+    const char *home = std::getenv("HOME");
+
+    if (home == nullptr || home[0] == '\0') {
+        return "engine_sim_audio_diagnostics.csv";
+    }
+
+    return std::string(home)
+        + "/Documents/engine_sim_audio_diagnostics.csv";
+}
+
+struct AudioDiagnosticLogger {
+    std::ofstream stream;
+    std::uint64_t sampleIndex = 0;
+
+    void ensureOpen() {
+        if (stream.is_open()) return;
+
+        stream.open(
+            audioDiagnosticsPath(),
+            std::ios::out | std::ios::trunc);
+
+        if (!stream.is_open()) return;
+
+        stream
+            << "sample_index"
+            << ",channel"
+            << ",input_transfer"
+            << ",jittered"
+            << ",dc_component"
+            << ",ac_component"
+            << ",derivative"
+            << ",noise_filtered"
+            << ",pre_convolution"
+            << ",post_convolution"
+            << ",signal_sum_pre_antialias"
+            << ",signal_post_antialias"
+            << ",leveler_gain"
+            << ",leveled"
+            << ",pcm"
+            << "\\n";
+
+        stream.flush();
+    }
+
+    bool shouldLog() {
+        ensureOpen();
+
+        const bool result =
+            (sampleIndex % 128ULL) == 0ULL;
+
+        ++sampleIndex;
+
+        return result && stream.is_open();
+    }
+};
+
+AudioDiagnosticLogger &audioDiagnosticLogger() {
+    static AudioDiagnosticLogger logger;
+    return logger;
+}
+
 float audioRandom(std::atomic<uint32_t> &state) {
     uint32_t value = state.load(std::memory_order_relaxed);
     uint32_t next;
@@ -423,60 +490,253 @@ void Synthesizer::setInputSampleRate(double sampleRate) {
     }
 }
 
-int16_t Synthesizer::renderAudio(int inputSample, const AudioParameters &parameters) {
-    const float airNoise = parameters.airNoise;
-    const float dF_F_mix = parameters.dF_F_mix;
-    const float convAmount = parameters.convolution;
+int16_t Synthesizer::renderAudio(
+    int inputSample,
+    const AudioParameters &parameters)
+{
+    const float airNoise =
+        parameters.airNoise;
 
-    float signal = 0;
-    for (int i = 0; i < m_inputChannelCount; ++i) {
+    const float dF_F_mix =
+        parameters.dF_F_mix;
+
+    const float convAmount =
+        parameters.convolution;
+
+    AudioDiagnosticLogger &diag =
+        audioDiagnosticLogger();
+
+    const bool logThisSample =
+        diag.shouldLog();
+
+    float signal =
+        0.0f;
+
+    float diagInput =
+        0.0f;
+
+    float diagJittered =
+        0.0f;
+
+    float diagDc =
+        0.0f;
+
+    float diagAc =
+        0.0f;
+
+    float diagDerivative =
+        0.0f;
+
+    float diagNoiseFiltered =
+        0.0f;
+
+    float diagPreConv =
+        0.0f;
+
+    float diagPostConv =
+        0.0f;
+
+    for (
+        int i = 0;
+        i < m_inputChannelCount;
+        ++i)
+    {
+        const float inputTransfer =
+            m_inputChannels[i]
+                .transferBuffer[
+                    inputSample];
+
         const float jitteredSample =
-            m_filters[i].jitterFilter.fast_f(m_inputChannels[i].transferBuffer[inputSample]);
+            m_filters[i]
+                .jitterFilter
+                .fast_f(
+                    inputTransfer);
 
-        const float f_in = jitteredSample;
-        const float f_dc = m_filters[i].inputDcFilter.fast_f(f_in);
-        const float f = f_in - f_dc;
-        const float f_p = m_filters[i].derivative.f(f_in);
+        const float f_in =
+            jitteredSample;
+
+        const float f_dc =
+            m_filters[i]
+                .inputDcFilter
+                .fast_f(
+                    f_in);
+
+        const float f =
+            f_in - f_dc;
+
+        const float f_p =
+            m_filters[i]
+                .derivative
+                .f(
+                    f_in);
 
 #if defined(__EMSCRIPTEN__)
-        const float noise = audioRandom(m_audioNoiseState);
+        const float noise =
+            audioRandom(
+                m_audioNoiseState);
 #else
-        const float noise = 2.0 * ((double)rand() / RAND_MAX) - 1.0;
+        const float noise =
+            2.0f
+            * static_cast<float>(
+                static_cast<double>(rand())
+                / RAND_MAX)
+            - 1.0f;
 #endif
+
         const float r =
-            m_filters->airNoiseLowPass.fast_f(noise);
+            m_filters[i]
+                .airNoiseLowPass
+                .fast_f(
+                    noise);
+
         const float r_mixed =
-            airNoise * r + (1 - airNoise);
+            airNoise * r
+            + (1.0f - airNoise);
 
         float v_in =
             f_p * dF_F_mix
-            + f * r_mixed * (1 - dF_F_mix);
-        if (std::fpclassify(v_in) == FP_SUBNORMAL) {
-            v_in = 0;
+            + f
+                * r_mixed
+                * (1.0f - dF_F_mix);
+
+        if (
+            std::fpclassify(v_in)
+            == FP_SUBNORMAL)
+        {
+            v_in =
+                0.0f;
         }
 
-        const float v = (convAmount > 0.0f && m_filters[i].convolution.getSampleCount() > 0)
-            ? convAmount * m_filters[i].convolution.f(v_in) + (1 - convAmount) * v_in
+        const float v =
+            (
+                convAmount > 0.0f
+                && m_filters[i]
+                    .convolution
+                    .getSampleCount()
+                    > 0
+            )
+            ? convAmount
+                * m_filters[i]
+                    .convolution
+                    .f(
+                        v_in)
+                + (1.0f - convAmount)
+                    * v_in
             : v_in;
 
-        signal += v;
+        signal +=
+            v;
+
+        if (
+            logThisSample
+            && i == 0)
+        {
+            diagInput =
+                inputTransfer;
+
+            diagJittered =
+                jitteredSample;
+
+            diagDc =
+                f_dc;
+
+            diagAc =
+                f;
+
+            diagDerivative =
+                f_p;
+
+            diagNoiseFiltered =
+                r;
+
+            diagPreConv =
+                v_in;
+
+            diagPostConv =
+                v;
+        }
     }
 
-    signal = m_antialiasing.fast_f(signal);
+    const float signalPreAntialias =
+        signal;
 
-    m_levelingFilter.p_target = parameters.levelerTarget;
-    m_levelingFilter.p_maxLevel = parameters.levelerMaxGain;
-    m_levelingFilter.p_minLevel = parameters.levelerMinGain;
-    const float v_leveled = m_levelingFilter.f(signal) * parameters.volume;
-    int r_int = std::lround(v_leveled);
+    signal =
+        m_antialiasing
+            .fast_f(
+                signal);
+
+    m_levelingFilter.p_target =
+        parameters.levelerTarget;
+
+    m_levelingFilter.p_maxLevel =
+        parameters.levelerMaxGain;
+
+    m_levelingFilter.p_minLevel =
+        parameters.levelerMinGain;
+
+    const float levelerGainBefore =
+        static_cast<float>(
+            m_levelingFilter
+                .getAttenuation());
+
+    const float v_leveled =
+        m_levelingFilter
+            .f(
+                signal)
+        * parameters.volume;
+
+    int r_int =
+        std::lround(
+            v_leveled);
+
     if (r_int > INT16_MAX) {
-        r_int = INT16_MAX;
+        r_int =
+            INT16_MAX;
     }
     else if (r_int < INT16_MIN) {
-        r_int = INT16_MIN;
+        r_int =
+            INT16_MIN;
     }
 
-    return static_cast<int16_t>(r_int);
+    if (logThisSample) {
+        diag.stream
+            << (diag.sampleIndex - 1)
+            << ",0"
+            << ","
+            << std::setprecision(12)
+            << diagInput
+            << ","
+            << diagJittered
+            << ","
+            << diagDc
+            << ","
+            << diagAc
+            << ","
+            << diagDerivative
+            << ","
+            << diagNoiseFiltered
+            << ","
+            << diagPreConv
+            << ","
+            << diagPostConv
+            << ","
+            << signalPreAntialias
+            << ","
+            << signal
+            << ","
+            << levelerGainBefore
+            << ","
+            << v_leveled
+            << ","
+            << r_int
+            << "\n";
+
+        diag.stream.flush();
+    }
+
+    return
+        static_cast<int16_t>(
+            r_int);
 }
 
 void Synthesizer::renderRealtimeAudio(float *target, int samples) {
