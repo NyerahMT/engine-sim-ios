@@ -462,8 +462,7 @@ int16_t Synthesizer::renderAudio(
                     f_in);
 
         const float f =
-            f_in
-            - f_dc;
+            f_in - f_dc;
 
         float f_p =
             m_filters[i]
@@ -471,30 +470,10 @@ int16_t Synthesizer::renderAudio(
                 .f(
                     f_in);
 
-        /*
-         * iOS audio stability guard.
-         *
-         * Runtime diagnostics showed the derivative branch producing spikes
-         * above 1e10 during closed-throttle deceleration. Even with the normal
-         * 1% dF/F mix, those transients entered convolution above 1e8 and
-         * eventually hard-clipped the 16-bit PCM output.
-         *
-         * Keep the derivative effect, but prevent pathological transients from
-         * overwhelming the rest of the synthesis chain.
-         */
         if (!std::isfinite(f_p)) {
             f_p =
                 0.0f;
         }
-
-        constexpr float derivativeLimit =
-            2.0e7f;
-
-        f_p =
-            std::clamp(
-                f_p,
-                -derivativeLimit,
-                derivativeLimit);
 
 #if defined(__EMSCRIPTEN__)
         const float noise =
@@ -524,10 +503,6 @@ int16_t Synthesizer::renderAudio(
                 - airNoise
             );
 
-        float derivativeContribution =
-            f_p
-            * dF_F_mix;
-
         const float baseContribution =
             f
             * r_mixed
@@ -536,22 +511,46 @@ int16_t Synthesizer::renderAudio(
                 - dF_F_mix
             );
 
-        /*
-         * Bound only the derivative branch. This leaves the main exhaust
-         * signal untouched, preserving the normal engine tone and amplitude.
-         */
-        constexpr float derivativeContributionLimit =
-            250000.0f;
+        float derivativeContribution =
+            f_p
+            * dF_F_mix;
 
-        derivativeContribution =
-            std::clamp(
-                derivativeContribution,
-                -derivativeContributionLimit,
-                derivativeContributionLimit);
+        /*
+         * Deceleration-screech fix.
+         *
+         * Diagnostics showed that the derivative branch was routinely an
+         * order of magnitude larger than the actual exhaust-pressure branch,
+         * and could spike by several more orders of magnitude during overrun.
+         *
+         * The derivative term is meant to add high-frequency character, not
+         * replace the engine signal. Limit it relative to the instantaneous
+         * base exhaust contribution so it can color the sound without
+         * dominating it.
+         *
+         * The small floor keeps a little derivative character when the base
+         * signal crosses zero.
+         */
+        const float derivativeLimit =
+            std::max(
+                5000.0f,
+                std::abs(
+                    baseContribution));
+
+        if (!std::isfinite(derivativeContribution)) {
+            derivativeContribution =
+                0.0f;
+        }
+        else {
+            derivativeContribution =
+                std::clamp(
+                    derivativeContribution,
+                    -derivativeLimit,
+                    derivativeLimit);
+        }
 
         float v_in =
-            derivativeContribution
-            + baseContribution;
+            baseContribution
+            + derivativeContribution;
 
         if (!std::isfinite(v_in)) {
             v_in =
@@ -585,33 +584,26 @@ int16_t Synthesizer::renderAudio(
                 * v_in
             : v_in;
 
-        signal +=
-            v;
+        if (std::isfinite(v)) {
+            signal +=
+                v;
+        }
     }
 
-    /*
-     * Last-resort guard before the leveler. Under normal operation the
-     * derivative clamp above should keep us far below this value.
-     */
     if (!std::isfinite(signal)) {
         signal =
             0.0f;
-    }
-    else {
-        constexpr float preLevelerSignalLimit =
-            1.0e6f;
-
-        signal =
-            std::clamp(
-                signal,
-                -preLevelerSignalLimit,
-                preLevelerSignalLimit);
     }
 
     signal =
         m_antialiasing
             .fast_f(
                 signal);
+
+    if (!std::isfinite(signal)) {
+        signal =
+            0.0f;
+    }
 
     m_levelingFilter.p_target =
         parameters.levelerTarget;
@@ -622,24 +614,46 @@ int16_t Synthesizer::renderAudio(
     m_levelingFilter.p_minLevel =
         parameters.levelerMinGain;
 
-    const float v_leveled =
+    float v_leveled =
         m_levelingFilter
             .f(
                 signal)
         * parameters.volume;
 
+    if (!std::isfinite(v_leveled)) {
+        v_leveled =
+            0.0f;
+    }
+
+    /*
+     * Soft PCM limiter.
+     *
+     * Previously values beyond +/-32767 were hard-clipped, creating sharp
+     * flat-topped discontinuities that sound especially metallic on sustained
+     * overrun. A tanh limiter approaches the int16 rails smoothly instead.
+     *
+     * 30000 leaves a little headroom beneath the hardware PCM limit.
+     */
+    constexpr float softLimit =
+        30000.0f;
+
+    const float limited =
+        softLimit
+        * std::tanh(
+            v_leveled
+            / softLimit);
+
     int r_int =
         std::lround(
-            v_leveled);
+            limited);
 
-    if (r_int > INT16_MAX) {
-        r_int =
-            INT16_MAX;
-    }
-    else if (r_int < INT16_MIN) {
-        r_int =
-            INT16_MIN;
-    }
+    r_int =
+        std::clamp(
+            r_int,
+            static_cast<int>(
+                INT16_MIN),
+            static_cast<int>(
+                INT16_MAX));
 
     return
         static_cast<int16_t>(
