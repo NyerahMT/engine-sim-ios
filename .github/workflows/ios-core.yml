@@ -35,35 +35,76 @@ jobs:
 
           XCODE_PATH=""
 
-          if [ -d "/Applications/Xcode.app" ]; then
-            DEFAULT_MAJOR="$(
-              /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
-                -version \
-                | awk '/Xcode/ {split($2, v, "."); print v[1]; exit}'
+          get_xcode_major() {
+            local app_path="$1"
+            local version_output
+            local first_line
+            local version
+            local major
+
+            version_output="$(
+              "$app_path/Contents/Developer/usr/bin/xcodebuild" -version 2>&1
             )"
 
-            if [ "${DEFAULT_MAJOR:-0}" -ge 26 ]; then
+            first_line="${version_output%%$'\n'*}"
+            version="${first_line#Xcode }"
+            major="${version%%.*}"
+
+            if [[ "$major" =~ ^[0-9]+$ ]]; then
+              printf '%s\n' "$major"
+            else
+              printf '0\n'
+            fi
+          }
+
+          if [ -d "/Applications/Xcode.app" ]; then
+            DEFAULT_MAJOR="$(get_xcode_major "/Applications/Xcode.app")"
+
+            echo "Default Xcode major version: $DEFAULT_MAJOR"
+
+            if [ "$DEFAULT_MAJOR" -ge 26 ]; then
               XCODE_PATH="/Applications/Xcode.app"
             fi
           fi
 
           if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="$(
-              ls -d /Applications/Xcode_26*.app 2>/dev/null \
-                | sort \
-                | tail -n 1 \
-                || true
-            )"
+            while IFS= read -r CANDIDATE; do
+              [ -d "$CANDIDATE" ] || continue
+
+              CANDIDATE_MAJOR="$(get_xcode_major "$CANDIDATE")"
+
+              echo "Found $(basename "$CANDIDATE") — major version $CANDIDATE_MAJOR"
+
+              if [ "$CANDIDATE_MAJOR" -ge 26 ]; then
+                XCODE_PATH="$CANDIDATE"
+              fi
+            done < <(
+              find /Applications \
+                -maxdepth 1 \
+                -type d \
+                -name 'Xcode*.app' \
+                -print \
+                | sort
+            )
           fi
 
           if [ -z "$XCODE_PATH" ]; then
+            echo
             echo "ERROR: Xcode 26 or newer was not found on this runner."
             echo
             echo "Installed Xcode applications:"
-            ls -d /Applications/Xcode*.app 2>/dev/null || true
+
+            find /Applications \
+              -maxdepth 1 \
+              -type d \
+              -name 'Xcode*.app' \
+              -print \
+              || true
+
             exit 1
           fi
 
+          echo
           echo "Selecting:"
           echo "$XCODE_PATH"
 
@@ -76,21 +117,26 @@ jobs:
 
           echo
           echo "Xcode:"
-          xcodebuild -version
+          XCODE_VERSION_OUTPUT="$(xcodebuild -version 2>&1)"
+          printf '%s\n' "$XCODE_VERSION_OUTPUT"
 
           echo
           echo "iPhoneOS SDK:"
-          xcrun \
-            --sdk iphoneos \
-            --show-sdk-version
-
           SDK_VERSION="$(
             xcrun \
               --sdk iphoneos \
               --show-sdk-version
           )"
 
+          printf '%s\n' "$SDK_VERSION"
+
           SDK_MAJOR="${SDK_VERSION%%.*}"
+
+          if ! [[ "$SDK_MAJOR" =~ ^[0-9]+$ ]]; then
+            echo
+            echo "ERROR: Could not determine iPhoneOS SDK major version."
+            exit 1
+          fi
 
           if [ "$SDK_MAJOR" -lt 26 ]; then
             echo
@@ -100,7 +146,7 @@ jobs:
           fi
 
           echo
-          echo "SDK validation passed: iOS $SDK_VERSION"
+          echo "✅ SDK validation passed: iOS $SDK_VERSION"
 
       - name: "[5%] Checkout source"
         uses: actions/checkout@v4
@@ -150,15 +196,20 @@ jobs:
           echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
           echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
 
+          BISON_VERSION="$(
+            /opt/homebrew/opt/bison/bin/bison --version 2>&1
+          )"
+
+          FLEX_VERSION="$(
+            /opt/homebrew/opt/flex/bin/flex --version 2>&1
+          )"
+
           echo "Bison:"
-          /opt/homebrew/opt/bison/bin/bison \
-            --version \
-            | head -n 1
+          printf '%s\n' "${BISON_VERSION%%$'\n'*}"
 
           echo
           echo "Flex:"
-          /opt/homebrew/opt/flex/bin/flex \
-            --version
+          printf '%s\n' "$FLEX_VERSION"
 
       - name: "[25%] Validate source tree"
         run: |
@@ -232,7 +283,8 @@ jobs:
               -type d \
               -path '*Release-iphoneos*' \
               -name 'EngineSim.app' \
-              | head -n 1
+              -print \
+              | sed -n '1p'
           )"
 
           if [ -z "$APP_PATH" ]; then
@@ -240,7 +292,8 @@ jobs:
               find "$BUILD_DIR" \
                 -type d \
                 -name 'EngineSim.app' \
-                | head -n 1
+                -print \
+                | sed -n '1p'
             )"
           fi
 
@@ -346,36 +399,64 @@ jobs:
 
           XCODE_PATH=""
 
-          if [ -d "/Applications/Xcode.app" ]; then
-            DEFAULT_MAJOR="$(
-              /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
-                -version \
-                | awk '/Xcode/ {split($2, v, "."); print v[1]; exit}'
+          get_xcode_major() {
+            local app_path="$1"
+            local version_output
+            local first_line
+            local version
+            local major
+
+            version_output="$(
+              "$app_path/Contents/Developer/usr/bin/xcodebuild" -version 2>&1
             )"
 
-            if [ "${DEFAULT_MAJOR:-0}" -ge 26 ]; then
+            first_line="${version_output%%$'\n'*}"
+            version="${first_line#Xcode }"
+            major="${version%%.*}"
+
+            if [[ "$major" =~ ^[0-9]+$ ]]; then
+              printf '%s\n' "$major"
+            else
+              printf '0\n'
+            fi
+          }
+
+          if [ -d "/Applications/Xcode.app" ]; then
+            DEFAULT_MAJOR="$(get_xcode_major "/Applications/Xcode.app")"
+
+            if [ "$DEFAULT_MAJOR" -ge 26 ]; then
               XCODE_PATH="/Applications/Xcode.app"
             fi
           fi
 
           if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="$(
-              ls -d /Applications/Xcode_26*.app 2>/dev/null \
-                | sort \
-                | tail -n 1 \
-                || true
-            )"
+            while IFS= read -r CANDIDATE; do
+              [ -d "$CANDIDATE" ] || continue
+
+              CANDIDATE_MAJOR="$(get_xcode_major "$CANDIDATE")"
+
+              if [ "$CANDIDATE_MAJOR" -ge 26 ]; then
+                XCODE_PATH="$CANDIDATE"
+              fi
+            done < <(
+              find /Applications \
+                -maxdepth 1 \
+                -type d \
+                -name 'Xcode*.app' \
+                -print \
+                | sort
+            )
           fi
 
           if [ -z "$XCODE_PATH" ]; then
             echo "ERROR: Xcode 26 or newer was not found."
-            ls -d /Applications/Xcode*.app 2>/dev/null || true
             exit 1
           fi
 
           sudo xcode-select \
             -s "$XCODE_PATH/Contents/Developer"
 
+          echo "Signing toolchain:"
           xcodebuild -version
 
       - name: "[58%] Download compiled application"
@@ -398,7 +479,8 @@ jobs:
             find "$RUNNER_TEMP/enginesim-unsigned" \
               -type d \
               -name 'EngineSim.app' \
-              | head -n 1
+              -print \
+              | sed -n '1p'
           )"
 
           if [ -z "$APP_PATH" ]; then
@@ -549,23 +631,22 @@ jobs:
             -o "$ENTITLEMENTS_PATH" \
             "$PROFILE_PLIST"
 
-          SIGNING_IDENTITY="$(
-            security find-identity \
-              -v \
-              -p codesigning \
-              "$KEYCHAIN_PATH" \
-              | awk -F '"' '/Apple Distribution/ {print $2; exit}'
-          )"
-
-          if [ -z "$SIGNING_IDENTITY" ]; then
-            echo "ERROR: Apple Distribution signing identity not found."
-
+          IDENTITY_OUTPUT="$(
             security find-identity \
               -v \
               -p codesigning \
               "$KEYCHAIN_PATH" \
               || true
+          )"
 
+          SIGNING_IDENTITY="$(
+            printf '%s\n' "$IDENTITY_OUTPUT" \
+              | awk -F '"' '/Apple Distribution/ {print $2; exit}'
+          )"
+
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "ERROR: Apple Distribution signing identity not found."
+            printf '%s\n' "$IDENTITY_OUTPUT"
             exit 1
           fi
 
@@ -670,11 +751,16 @@ jobs:
           echo
           echo "Signing details:"
 
-          codesign \
-            -d \
-            --verbose=4 \
-            "$APP_PATH" \
-            2>&1 \
+          SIGNING_DETAILS="$(
+            codesign \
+              -d \
+              --verbose=4 \
+              "$APP_PATH" \
+              2>&1 \
+              || true
+          )"
+
+          printf '%s\n' "$SIGNING_DETAILS" \
             | grep -E 'Identifier=|TeamIdentifier=|Authority=' \
             || true
 
@@ -740,30 +826,57 @@ jobs:
 
           XCODE_PATH=""
 
-          if [ -d "/Applications/Xcode.app" ]; then
-            DEFAULT_MAJOR="$(
-              /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
-                -version \
-                | awk '/Xcode/ {split($2, v, "."); print v[1]; exit}'
+          get_xcode_major() {
+            local app_path="$1"
+            local version_output
+            local first_line
+            local version
+            local major
+
+            version_output="$(
+              "$app_path/Contents/Developer/usr/bin/xcodebuild" -version 2>&1
             )"
 
-            if [ "${DEFAULT_MAJOR:-0}" -ge 26 ]; then
+            first_line="${version_output%%$'\n'*}"
+            version="${first_line#Xcode }"
+            major="${version%%.*}"
+
+            if [[ "$major" =~ ^[0-9]+$ ]]; then
+              printf '%s\n' "$major"
+            else
+              printf '0\n'
+            fi
+          }
+
+          if [ -d "/Applications/Xcode.app" ]; then
+            DEFAULT_MAJOR="$(get_xcode_major "/Applications/Xcode.app")"
+
+            if [ "$DEFAULT_MAJOR" -ge 26 ]; then
               XCODE_PATH="/Applications/Xcode.app"
             fi
           fi
 
           if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="$(
-              ls -d /Applications/Xcode_26*.app 2>/dev/null \
-                | sort \
-                | tail -n 1 \
-                || true
-            )"
+            while IFS= read -r CANDIDATE; do
+              [ -d "$CANDIDATE" ] || continue
+
+              CANDIDATE_MAJOR="$(get_xcode_major "$CANDIDATE")"
+
+              if [ "$CANDIDATE_MAJOR" -ge 26 ]; then
+                XCODE_PATH="$CANDIDATE"
+              fi
+            done < <(
+              find /Applications \
+                -maxdepth 1 \
+                -type d \
+                -name 'Xcode*.app' \
+                -print \
+                | sort
+            )
           fi
 
           if [ -z "$XCODE_PATH" ]; then
             echo "ERROR: Xcode 26 or newer was not found."
-            ls -d /Applications/Xcode*.app 2>/dev/null || true
             exit 1
           fi
 
