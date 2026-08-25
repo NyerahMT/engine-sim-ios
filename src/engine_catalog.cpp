@@ -12,31 +12,23 @@ namespace {
 
 namespace fs = std::filesystem;
 
-std::string titleize(std::string value) {
-    std::replace(
-        value.begin(),
-        value.end(),
-        '_',
-        ' ');
+std::vector<EngineCatalogEntry> g_catalog;
+bool g_catalogInitialized = false;
 
-    std::replace(
-        value.begin(),
-        value.end(),
-        '-',
-        ' ');
+std::string titleize(std::string value) {
+    std::replace(value.begin(), value.end(), '_', ' ');
+    std::replace(value.begin(), value.end(), '-', ' ');
 
     bool capitalize = true;
 
-    for (char &character : value) {
-        if (character == ' ') {
+    for (char &c : value) {
+        if (c == ' ') {
             capitalize = true;
         }
         else if (capitalize) {
-            character =
-                static_cast<char>(
-                    std::toupper(
-                        static_cast<unsigned char>(
-                            character)));
+            c = static_cast<char>(
+                std::toupper(
+                    static_cast<unsigned char>(c)));
 
             capitalize = false;
         }
@@ -45,29 +37,25 @@ std::string titleize(std::string value) {
     return value;
 }
 
-std::string engineNameFromPath(
-    const fs::path &path)
-{
+std::string engineNameFromPath(const fs::path &path) {
     std::string filename =
         path.stem().string();
 
-    const size_t numericPrefixEnd =
+    const std::size_t prefixEnd =
         filename.find('_');
 
     if (
-        numericPrefixEnd
-            != std::string::npos
+        prefixEnd != std::string::npos
         && std::all_of(
             filename.begin(),
-            filename.begin()
-                + numericPrefixEnd,
+            filename.begin() + prefixEnd,
             [](unsigned char c) {
                 return std::isdigit(c);
             }))
     {
         filename.erase(
             0,
-            numericPrefixEnd + 1);
+            prefixEnd + 1);
     }
 
     return titleize(filename);
@@ -76,59 +64,52 @@ std::string engineNameFromPath(
 EngineCatalogEntry makeBundledEntry(
     const char *relativePath)
 {
-    const std::string path(
-        relativePath);
+    const std::string path(relativePath);
 
-    const size_t groupStart =
-        std::string(
-            "engines/")
-            .size();
+    const std::size_t groupStart =
+        std::string("engines/").size();
 
-    const size_t groupEnd =
-        path.find(
-            '/',
-            groupStart);
+    const std::size_t groupEnd =
+        path.find('/', groupStart);
 
-    const size_t filenameStart =
-        path.rfind('/')
-        + 1;
+    const std::size_t filenameStart =
+        path.rfind('/') + 1;
 
     std::string filename =
-        path.substr(
-            filenameStart);
+        path.substr(filenameStart);
 
     if (
-        filename.size() >= 3)
+        filename.size() >= 3
+        && filename.substr(
+            filename.size() - 3)
+            == ".mr")
     {
         filename.erase(
             filename.size() - 3);
     }
 
-    const size_t numericPrefixEnd =
+    const std::size_t prefixEnd =
         filename.find('_');
 
     if (
-        numericPrefixEnd
-            != std::string::npos
+        prefixEnd != std::string::npos
         && std::all_of(
             filename.begin(),
-            filename.begin()
-                + numericPrefixEnd,
+            filename.begin() + prefixEnd,
             [](unsigned char c) {
                 return std::isdigit(c);
             }))
     {
         filename.erase(
             0,
-            numericPrefixEnd + 1);
+            prefixEnd + 1);
     }
 
     return {
         titleize(
             path.substr(
                 groupStart,
-                groupEnd
-                    - groupStart)),
+                groupEnd - groupStart)),
         titleize(filename),
         path
     };
@@ -137,16 +118,6 @@ EngineCatalogEntry makeBundledEntry(
 fs::path customEngineDirectory() {
 #if defined(ENGINE_SIM_IOS)
 
-    /*
-     * iOS gives the app a writable data container.
-     *
-     * HOME points at:
-     *
-     * /var/mobile/Containers/Data/Application/<UUID>
-     *
-     * Documents is exposed to the Files app once
-     * UIFileSharingEnabled is enabled in Info.plist.
-     */
     const char *home =
         std::getenv("HOME");
 
@@ -164,23 +135,14 @@ fs::path customEngineDirectory() {
 
 #else
 
-    /*
-     * Keep desktop behavior harmless.
-     *
-     * A desktop custom-engine directory can be added later
-     * without changing the iOS implementation.
-     */
     return {};
 
 #endif
 }
 
-bool isMrFile(
-    const fs::path &path)
-{
+bool isMrFile(const fs::path &path) {
     std::string extension =
-        path.extension()
-            .string();
+        path.extension().string();
 
     std::transform(
         extension.begin(),
@@ -194,33 +156,28 @@ bool isMrFile(
     return extension == ".mr";
 }
 
-bool looksLikeHelperScript(
-    const fs::path &path)
-{
-    /*
-     * Don't clutter the picker with the core library or obvious
-     * helper/include files from downloaded engine packages.
-     *
-     * A package's main engine script still appears normally.
-     */
-    const std::string stem =
-        path.stem()
-            .string();
+bool obviousLibraryFile(const fs::path &path) {
+    std::string stem =
+        path.stem().string();
 
-    if (
+    std::transform(
+        stem.begin(),
+        stem.end(),
+        stem.begin(),
+        [](unsigned char c) {
+            return static_cast<char>(
+                std::tolower(c));
+        });
+
+    return
         stem == "engine_sim"
         || stem == "utilities"
         || stem == "constants"
-        || stem == "units")
-    {
-        return true;
-    }
-
-    return false;
+        || stem == "units";
 }
 
 void appendCustomEngines(
-    std::vector<EngineCatalogEntry> &result)
+    std::vector<EngineCatalogEntry> &catalog)
 {
 #if defined(ENGINE_SIM_IOS)
 
@@ -234,13 +191,14 @@ void appendCustomEngines(
     std::error_code error;
 
     /*
-     * Create the folder automatically.
+     * Always create this directory.
      *
-     * Once the app has launched once, Files will show:
+     * With UIFileSharingEnabled the user will see:
      *
-     * On My iPhone
-     *   Engine Simulator
-     *     Custom Engines
+     * Files
+     *   On My iPhone
+     *     Engine Simulator
+     *       Custom Engines
      */
     fs::create_directories(
         root,
@@ -249,67 +207,54 @@ void appendCustomEngines(
     error.clear();
 
     if (
-        !fs::exists(
-            root,
-            error))
+        !fs::exists(root, error)
+        || error)
     {
         return;
     }
 
-    std::vector<
-        EngineCatalogEntry>
-        custom;
+    std::vector<EngineCatalogEntry> custom;
 
-    fs::recursive_directory_iterator iterator(
+    fs::recursive_directory_iterator it(
         root,
-        fs::directory_options::
-            skip_permission_denied,
+        fs::directory_options::skip_permission_denied,
         error);
 
     const fs::recursive_directory_iterator end;
 
     while (
         !error
-        && iterator != end)
+        && it != end)
     {
-        const fs::directory_entry &entry =
-            *iterator;
+        const fs::directory_entry &file =
+            *it;
 
-        std::error_code entryError;
+        std::error_code fileError;
 
         if (
-            entry.is_regular_file(
-                entryError)
-            && !entryError
-            && isMrFile(
-                entry.path())
-            && !looksLikeHelperScript(
-                entry.path()))
+            file.is_regular_file(fileError)
+            && !fileError
+            && isMrFile(file.path())
+            && !obviousLibraryFile(file.path()))
         {
-            /*
-             * The application loader already supports this.
-             *
-             * std::filesystem::path(assetPath) / absolutePath
-             * resolves to absolutePath, so no special loading path
-             * is necessary.
-             */
             custom.push_back({
                 "Downloaded Engines",
                 engineNameFromPath(
-                    entry.path()),
-                entry.path()
-                    .string()
+                    file.path()),
+                /*
+                 * Absolute paths are intentional.
+                 *
+                 * std::filesystem path composition keeps an
+                 * absolute RHS absolute when loadScript builds
+                 * the final source path.
+                 */
+                file.path().string()
             });
         }
 
-        iterator.increment(
-            error);
+        it.increment(error);
     }
 
-    /*
-     * Stable alphabetical list regardless of Files/iOS
-     * directory enumeration order.
-     */
     std::sort(
         custom.begin(),
         custom.end(),
@@ -326,70 +271,51 @@ void appendCustomEngines(
                 < b.relativeScriptPath;
         });
 
-    result.insert(
-        result.end(),
+    catalog.insert(
+        catalog.end(),
         custom.begin(),
         custom.end());
 
 #endif
 }
 
-std::vector<EngineCatalogEntry>
-buildCatalog()
-{
+std::vector<EngineCatalogEntry> buildCatalog() {
     const char *paths[] = {
 #include "engine_catalog_paths.inc"
     };
 
-    std::vector<
-        EngineCatalogEntry>
-        result;
+    std::vector<EngineCatalogEntry> result;
 
     result.reserve(
-        sizeof(paths)
-            / sizeof(paths[0])
-        + 32);
+        sizeof(paths) / sizeof(paths[0])
+        + 64);
 
-    for (
-        const char *path
-        : paths)
-    {
+    for (const char *path : paths) {
         result.push_back(
-            makeBundledEntry(
-                path));
+            makeBundledEntry(path));
     }
 
-    appendCustomEngines(
-        result);
+    appendCustomEngines(result);
 
     return result;
 }
 
 }
 
+void refreshEngineCatalog() {
+    g_catalog =
+        buildCatalog();
+
+    g_catalogInitialized =
+        true;
+}
+
 const std::vector<EngineCatalogEntry> &
 engineCatalog()
 {
-    /*
-     * Deliberately rescan on every call.
-     *
-     * Engine catalogs are tiny, and this means a user can:
-     *
-     * 1. background Engine Simulator
-     * 2. save an engine in Files
-     * 3. return
-     * 4. reopen the engine picker
-     *
-     * without restarting the app.
-     *
-     * The returned reference remains valid until the next call.
-     */
-    static std::vector<
-        EngineCatalogEntry>
-        catalog;
+    if (!g_catalogInitialized) {
+        refreshEngineCatalog();
+    }
 
-    catalog =
-        buildCatalog();
-
-    return catalog;
+    return g_catalog;
 }
