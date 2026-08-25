@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     EngineSimIOSHost
-    VERSION 0.3.1
+    VERSION 0.4.0
     LANGUAGES
         C
         CXX
@@ -33,7 +33,9 @@ if(NOT IOS)
 endif()
 
 #
+# ============================================================
 # EngineSim configuration
+# ============================================================
 #
 
 set(
@@ -60,9 +62,13 @@ set(
     FORCE
 )
 
+#
+# REAL EngineSim engine loading requires Piranha scripting.
+#
+
 set(
     ENGINE_SIM_BUILD_SCRIPTING
-    OFF
+    ON
     CACHE BOOL
     ""
     FORCE
@@ -85,7 +91,9 @@ set(
 )
 
 #
-# Bring EngineSim libraries into the iOS build.
+# ============================================================
+# EngineSim libraries
+# ============================================================
 #
 
 add_subdirectory(
@@ -95,7 +103,9 @@ add_subdirectory(
 )
 
 #
+# ============================================================
 # SDL3
+# ============================================================
 #
 
 include(
@@ -105,7 +115,9 @@ include(
 engine_sim_require_sdl3()
 
 #
-# iOS asset catalog
+# ============================================================
+# iOS resources
+# ============================================================
 #
 
 set(
@@ -113,16 +125,9 @@ set(
     "${CMAKE_CURRENT_LIST_DIR}/Assets.xcassets"
 )
 
-#
-# This is the important fix:
-#
-# Tell CMake that the .xcassets directory is an iOS bundle resource.
-# With the Xcode generator, this places it into the Resources build phase,
-# which causes Xcode's asset compiler (actool) to generate Assets.car.
-#
-
 set_source_files_properties(
     "${ENGINE_SIM_IOS_ASSET_CATALOG}"
+
     PROPERTIES
 
     MACOSX_PACKAGE_LOCATION
@@ -130,80 +135,165 @@ set_source_files_properties(
 )
 
 #
-# Native SDL3 iOS application.
+# ============================================================
+# Native application
+# ============================================================
 #
 
 add_executable(
     EngineSimIOS
+
     MACOSX_BUNDLE
 
     main.cpp
+
+    ios_platform_sdl.cpp
+
+    "${CMAKE_CURRENT_LIST_DIR}/../src/sdl_gpu_renderer.cpp"
+
+    "${CMAKE_CURRENT_LIST_DIR}/../src/sdl_audio_output.cpp"
+
+    "${CMAKE_CURRENT_LIST_DIR}/../src/sdl_audio_util.cpp"
 
     "${ENGINE_SIM_IOS_ASSET_CATALOG}"
 )
 
 target_compile_features(
     EngineSimIOS
+
     PRIVATE
+
     cxx_std_17
 )
 
 target_compile_definitions(
     EngineSimIOS
+
     PRIVATE
+
     ENGINE_SIM_IOS=1
 )
 
-#
-# Force EngineSim visualization through the
-# iPhone compiler.
-#
-
-add_dependencies(
+target_include_directories(
     EngineSimIOS
-    engine-sim-visualization
+
+    PRIVATE
+
+    "${CMAKE_CURRENT_LIST_DIR}"
+
+    "${CMAKE_CURRENT_LIST_DIR}/../include"
+
+    "${CMAKE_CURRENT_LIST_DIR}/../scripting/include"
 )
+
+#
+# ============================================================
+# Link actual EngineSim
+# ============================================================
+#
 
 target_link_libraries(
     EngineSimIOS
+
     PRIVATE
 
     SDL3::SDL3
 
     engine-sim::core
 
+    engine-sim-visualization
+
+    engine-sim-scripting
+
     "-framework UIKit"
+
     "-framework Foundation"
+
     "-framework CoreGraphics"
+
     "-framework QuartzCore"
+
     "-framework Metal"
+
+    "-framework MetalKit"
+
     "-framework GameController"
+
     "-framework AudioToolbox"
+
     "-framework AVFoundation"
+
+    "-framework CoreAudio"
 )
 
 if(TARGET SDL3::SDL3main)
 
     target_link_libraries(
         EngineSimIOS
+
         PRIVATE
+
         SDL3::SDL3main
     )
 
 endif()
 
-target_include_directories(
+#
+# ============================================================
+# Bundle assets
+# ============================================================
+#
+# RuntimePaths looks for an "assets" directory beside the
+# executable/bundle path.
+#
+# Copy the complete EngineSim asset tree after building:
+#
+# EngineSim.app/
+# ├── EngineSim
+# ├── Info.plist
+# ├── assets/
+# │   ├── main.mr
+# │   ├── engines/
+# │   ├── fonts/
+# │   ├── shaders/
+# │   ├── impulse_responses/
+# │   └── ...
+# └── ...
+#
+
+add_custom_command(
+    TARGET
     EngineSimIOS
-    PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../include"
+
+    POST_BUILD
+
+    COMMAND
+    "${CMAKE_COMMAND}"
+    -E
+    rm
+    -rf
+    "$<TARGET_BUNDLE_DIR:EngineSimIOS>/assets"
+
+    COMMAND
+    "${CMAKE_COMMAND}"
+    -E
+    copy_directory
+    "${CMAKE_CURRENT_LIST_DIR}/../assets"
+    "$<TARGET_BUNDLE_DIR:EngineSimIOS>/assets"
+
+    COMMENT
+    "Bundling EngineSim runtime assets"
 )
 
 #
-# App bundle settings.
+# ============================================================
+# iOS bundle configuration
+# ============================================================
 #
 
 set_target_properties(
     EngineSimIOS
+
     PROPERTIES
 
     OUTPUT_NAME
@@ -245,17 +335,8 @@ set_target_properties(
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC
     "YES"
 
-    #
-    # Tell Xcode which icon set in Assets.xcassets
-    # is the application's app icon.
-    #
-
     XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME
     "AppIcon"
-
-    #
-    # Include all device icon variants required by the target.
-    #
 
     XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS
     "YES"
