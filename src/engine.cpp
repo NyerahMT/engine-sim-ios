@@ -128,12 +128,31 @@ void Engine::initialize(
     m_fluidSimulationSteps =
         params.fluidSimulationSteps;
 
+    /*
+     * iOS safeguard.
+     *
+     * Community engine scripts may request substantially more fluid
+     * simulation iterations than the original simulator used.
+     *
+     * On mobile hardware this can prevent the physics simulation from
+     * running in real time. Once the simulation falls behind, combustion,
+     * idle stability and generated audio can become unstable.
+     *
+     * Original OES behavior used 8 fluid iterations.
+     */
     if (
         m_fluidSimulationSteps
         < 1)
     {
         m_fluidSimulationSteps =
             1;
+    }
+    else if (
+        m_fluidSimulationSteps
+        > 8)
+    {
+        m_fluidSimulationSteps =
+            8;
     }
 
     m_blockTemperature =
