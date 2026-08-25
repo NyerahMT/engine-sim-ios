@@ -29,6 +29,79 @@ jobs:
     runs-on: macos-15
 
     steps:
+      - name: "[3%] Select Xcode 26+"
+        run: |
+          set -euo pipefail
+
+          XCODE_PATH=""
+
+          if [ -d "/Applications/Xcode.app" ]; then
+            DEFAULT_MAJOR="$(
+              /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
+                -version \
+                | awk '/Xcode/ {split($2, v, "."); print v[1]; exit}'
+            )"
+
+            if [ "${DEFAULT_MAJOR:-0}" -ge 26 ]; then
+              XCODE_PATH="/Applications/Xcode.app"
+            fi
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="$(
+              ls -d /Applications/Xcode_26*.app 2>/dev/null \
+                | sort \
+                | tail -n 1 \
+                || true
+            )"
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            echo "ERROR: Xcode 26 or newer was not found on this runner."
+            echo
+            echo "Installed Xcode applications:"
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Selecting:"
+          echo "$XCODE_PATH"
+
+          sudo xcode-select \
+            -s "$XCODE_PATH/Contents/Developer"
+
+          echo
+          echo "Selected developer directory:"
+          xcode-select -p
+
+          echo
+          echo "Xcode:"
+          xcodebuild -version
+
+          echo
+          echo "iPhoneOS SDK:"
+          xcrun \
+            --sdk iphoneos \
+            --show-sdk-version
+
+          SDK_VERSION="$(
+            xcrun \
+              --sdk iphoneos \
+              --show-sdk-version
+          )"
+
+          SDK_MAJOR="${SDK_VERSION%%.*}"
+
+          if [ "$SDK_MAJOR" -lt 26 ]; then
+            echo
+            echo "ERROR: iPhoneOS SDK $SDK_VERSION is too old."
+            echo "App Store Connect requires iOS 26 SDK or newer."
+            exit 1
+          fi
+
+          echo
+          echo "SDK validation passed: iOS $SDK_VERSION"
+
       - name: "[5%] Checkout source"
         uses: actions/checkout@v4
         with:
@@ -39,8 +112,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/fetchcontent
-          key: enginesim-ios-fetchcontent-v2-${{ hashFiles('cmake/EngineSimSDL.cmake', '.gitmodules') }}
+          key: enginesim-ios-fetchcontent-v3-${{ hashFiles('cmake/EngineSimSDL.cmake', '.gitmodules') }}
           restore-keys: |
+            enginesim-ios-fetchcontent-v3-
             enginesim-ios-fetchcontent-v2-
             enginesim-ios-fetchcontent-
 
@@ -49,7 +123,7 @@ jobs:
         with:
           path: build/ios
           key: >-
-            enginesim-ios-appstore-v2-
+            enginesim-ios-xcode26-appstore-v1-
             ${{ hashFiles(
               'CMakeLists.txt',
               'ios/CMakeLists.txt',
@@ -58,8 +132,8 @@ jobs:
             ) }}-
             ${{ github.sha }}
           restore-keys: |
-            enginesim-ios-appstore-v2-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
-            enginesim-ios-appstore-v2-
+            enginesim-ios-xcode26-appstore-v1-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
+            enginesim-ios-xcode26-appstore-v1-
 
       - name: "[20%] Prepare compiler tools"
         run: |
@@ -77,11 +151,14 @@ jobs:
           echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
 
           echo "Bison:"
-          /opt/homebrew/opt/bison/bin/bison --version | head -n 1
+          /opt/homebrew/opt/bison/bin/bison \
+            --version \
+            | head -n 1
 
           echo
           echo "Flex:"
-          /opt/homebrew/opt/flex/bin/flex --version
+          /opt/homebrew/opt/flex/bin/flex \
+            --version
 
       - name: "[25%] Validate source tree"
         run: |
@@ -103,6 +180,15 @@ jobs:
       - name: "[35%] Configure iOS build"
         run: |
           set -euo pipefail
+
+          echo "Building with:"
+          xcodebuild -version
+
+          echo
+          echo "Using iPhoneOS SDK:"
+          xcrun \
+            --sdk iphoneos \
+            --show-sdk-version
 
           mkdir -p "$BUILD_DIR"
 
@@ -234,6 +320,16 @@ jobs:
             echo '[███████████---------] 55%'
             echo '```'
             echo
+            echo "Xcode:"
+            echo '```text'
+            xcodebuild -version || true
+            echo '```'
+            echo
+            echo "iPhoneOS SDK:"
+            echo '```text'
+            xcrun --sdk iphoneos --show-sdk-version || true
+            echo '```'
+            echo
             echo "Unsigned ARM64 iOS application compiled."
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -244,6 +340,44 @@ jobs:
       - build
 
     steps:
+      - name: "[57%] Select Xcode 26+"
+        run: |
+          set -euo pipefail
+
+          XCODE_PATH=""
+
+          if [ -d "/Applications/Xcode.app" ]; then
+            DEFAULT_MAJOR="$(
+              /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
+                -version \
+                | awk '/Xcode/ {split($2, v, "."); print v[1]; exit}'
+            )"
+
+            if [ "${DEFAULT_MAJOR:-0}" -ge 26 ]; then
+              XCODE_PATH="/Applications/Xcode.app"
+            fi
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="$(
+              ls -d /Applications/Xcode_26*.app 2>/dev/null \
+                | sort \
+                | tail -n 1 \
+                || true
+            )"
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            echo "ERROR: Xcode 26 or newer was not found."
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+
+          sudo xcode-select \
+            -s "$XCODE_PATH/Contents/Developer"
+
+          xcodebuild -version
+
       - name: "[58%] Download compiled application"
         uses: actions/download-artifact@v4
         with:
@@ -425,11 +559,13 @@ jobs:
 
           if [ -z "$SIGNING_IDENTITY" ]; then
             echo "ERROR: Apple Distribution signing identity not found."
+
             security find-identity \
               -v \
               -p codesigning \
               "$KEYCHAIN_PATH" \
               || true
+
             exit 1
           fi
 
@@ -452,7 +588,6 @@ jobs:
             "$APP_PATH/embedded.mobileprovision"
 
           if [ -d "$APP_PATH/Frameworks" ]; then
-
             find "$APP_PATH/Frameworks" \
               -type d \
               -name '*.framework' \
@@ -599,6 +734,45 @@ jobs:
       - sign
 
     steps:
+      - name: "[87%] Select Xcode 26+"
+        run: |
+          set -euo pipefail
+
+          XCODE_PATH=""
+
+          if [ -d "/Applications/Xcode.app" ]; then
+            DEFAULT_MAJOR="$(
+              /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
+                -version \
+                | awk '/Xcode/ {split($2, v, "."); print v[1]; exit}'
+            )"
+
+            if [ "${DEFAULT_MAJOR:-0}" -ge 26 ]; then
+              XCODE_PATH="/Applications/Xcode.app"
+            fi
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="$(
+              ls -d /Applications/Xcode_26*.app 2>/dev/null \
+                | sort \
+                | tail -n 1 \
+                || true
+            )"
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            echo "ERROR: Xcode 26 or newer was not found."
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+
+          sudo xcode-select \
+            -s "$XCODE_PATH/Contents/Developer"
+
+          echo "Upload toolchain:"
+          xcodebuild -version
+
       - name: "[88%] Download signed IPA"
         uses: actions/download-artifact@v4
         with:
@@ -652,6 +826,10 @@ jobs:
 
           IPA_PATH="artifacts/EngineSim-iOS-AppStore.ipa"
 
+          echo "Uploader:"
+          xcrun altool --version || true
+
+          echo
           echo "Uploading Engine Simulator to App Store Connect..."
 
           xcrun altool \
