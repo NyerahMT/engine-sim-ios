@@ -423,241 +423,60 @@ void Synthesizer::setInputSampleRate(double sampleRate) {
     }
 }
 
-int16_t Synthesizer::renderAudio(
-    int inputSample,
-    const AudioParameters &parameters)
-{
-    const float airNoise =
-        parameters.airNoise;
+int16_t Synthesizer::renderAudio(int inputSample, const AudioParameters &parameters) {
+    const float airNoise = parameters.airNoise;
+    const float dF_F_mix = parameters.dF_F_mix;
+    const float convAmount = parameters.convolution;
 
-    const float dF_F_mix =
-        parameters.dF_F_mix;
-
-    const float convAmount =
-        parameters.convolution;
-
-    float signal =
-        0.0f;
-
-    for (
-        int i = 0;
-        i < m_inputChannelCount;
-        ++i)
-    {
+    float signal = 0;
+    for (int i = 0; i < m_inputChannelCount; ++i) {
         const float jitteredSample =
-            m_filters[i]
-                .jitterFilter
-                .fast_f(
-                    m_inputChannels[i]
-                        .transferBuffer[
-                            inputSample]);
+            m_filters[i].jitterFilter.fast_f(m_inputChannels[i].transferBuffer[inputSample]);
 
-        const float f_in =
-            jitteredSample;
-
-        const float f_dc =
-            m_filters[i]
-                .inputDcFilter
-                .fast_f(
-                    f_in);
-
-        const float f =
-            f_in - f_dc;
-
-        float f_p =
-            m_filters[i]
-                .derivative
-                .f(
-                    f_in);
-
-        if (!std::isfinite(f_p)) {
-            f_p =
-                0.0f;
-        }
+        const float f_in = jitteredSample;
+        const float f_dc = m_filters[i].inputDcFilter.fast_f(f_in);
+        const float f = f_in - f_dc;
+        const float f_p = m_filters[i].derivative.f(f_in);
 
 #if defined(__EMSCRIPTEN__)
-        const float noise =
-            audioRandom(
-                m_audioNoiseState);
+        const float noise = audioRandom(m_audioNoiseState);
 #else
-        const float noise =
-            2.0f
-            * static_cast<float>(
-                static_cast<double>(
-                    rand())
-                / RAND_MAX)
-            - 1.0f;
+        const float noise = 2.0 * ((double)rand() / RAND_MAX) - 1.0;
 #endif
-
         const float r =
-            m_filters[i]
-                .airNoiseLowPass
-                .fast_f(
-                    noise);
-
+            m_filters->airNoiseLowPass.fast_f(noise);
         const float r_mixed =
-            airNoise
-                * r
-            + (
-                1.0f
-                - airNoise
-            );
-
-        const float baseContribution =
-            f
-            * r_mixed
-            * (
-                1.0f
-                - dF_F_mix
-            );
-
-        float derivativeContribution =
-            f_p
-            * dF_F_mix;
-
-        /*
-         * Deceleration-screech fix.
-         *
-         * Diagnostics showed that the derivative branch was routinely an
-         * order of magnitude larger than the actual exhaust-pressure branch,
-         * and could spike by several more orders of magnitude during overrun.
-         *
-         * The derivative term is meant to add high-frequency character, not
-         * replace the engine signal. Limit it relative to the instantaneous
-         * base exhaust contribution so it can color the sound without
-         * dominating it.
-         *
-         * The small floor keeps a little derivative character when the base
-         * signal crosses zero.
-         */
-        const float derivativeLimit =
-            std::max(
-                5000.0f,
-                std::abs(
-                    baseContribution));
-
-        if (!std::isfinite(derivativeContribution)) {
-            derivativeContribution =
-                0.0f;
-        }
-        else {
-            derivativeContribution =
-                std::clamp(
-                    derivativeContribution,
-                    -derivativeLimit,
-                    derivativeLimit);
-        }
+            airNoise * r + (1 - airNoise);
 
         float v_in =
-            baseContribution
-            + derivativeContribution;
-
-        if (!std::isfinite(v_in)) {
-            v_in =
-                0.0f;
-        }
-        else if (
-            std::fpclassify(v_in)
-            == FP_SUBNORMAL)
-        {
-            v_in =
-                0.0f;
+            f_p * dF_F_mix
+            + f * r_mixed * (1 - dF_F_mix);
+        if (std::fpclassify(v_in) == FP_SUBNORMAL) {
+            v_in = 0;
         }
 
-        const float v =
-            (
-                convAmount > 0.0f
-                && m_filters[i]
-                    .convolution
-                    .getSampleCount()
-                    > 0
-            )
-            ? convAmount
-                * m_filters[i]
-                    .convolution
-                    .f(
-                        v_in)
-                + (
-                    1.0f
-                    - convAmount
-                )
-                * v_in
+        const float v = (convAmount > 0.0f && m_filters[i].convolution.getSampleCount() > 0)
+            ? convAmount * m_filters[i].convolution.f(v_in) + (1 - convAmount) * v_in
             : v_in;
 
-        if (std::isfinite(v)) {
-            signal +=
-                v;
-        }
+        signal += v;
     }
 
-    if (!std::isfinite(signal)) {
-        signal =
-            0.0f;
+    signal = m_antialiasing.fast_f(signal);
+
+    m_levelingFilter.p_target = parameters.levelerTarget;
+    m_levelingFilter.p_maxLevel = parameters.levelerMaxGain;
+    m_levelingFilter.p_minLevel = parameters.levelerMinGain;
+    const float v_leveled = m_levelingFilter.f(signal) * parameters.volume;
+    int r_int = std::lround(v_leveled);
+    if (r_int > INT16_MAX) {
+        r_int = INT16_MAX;
+    }
+    else if (r_int < INT16_MIN) {
+        r_int = INT16_MIN;
     }
 
-    signal =
-        m_antialiasing
-            .fast_f(
-                signal);
-
-    if (!std::isfinite(signal)) {
-        signal =
-            0.0f;
-    }
-
-    m_levelingFilter.p_target =
-        parameters.levelerTarget;
-
-    m_levelingFilter.p_maxLevel =
-        parameters.levelerMaxGain;
-
-    m_levelingFilter.p_minLevel =
-        parameters.levelerMinGain;
-
-    float v_leveled =
-        m_levelingFilter
-            .f(
-                signal)
-        * parameters.volume;
-
-    if (!std::isfinite(v_leveled)) {
-        v_leveled =
-            0.0f;
-    }
-
-    /*
-     * Soft PCM limiter.
-     *
-     * Previously values beyond +/-32767 were hard-clipped, creating sharp
-     * flat-topped discontinuities that sound especially metallic on sustained
-     * overrun. A tanh limiter approaches the int16 rails smoothly instead.
-     *
-     * 30000 leaves a little headroom beneath the hardware PCM limit.
-     */
-    constexpr float softLimit =
-        30000.0f;
-
-    const float limited =
-        softLimit
-        * std::tanh(
-            v_leveled
-            / softLimit);
-
-    int r_int =
-        std::lround(
-            limited);
-
-    r_int =
-        std::clamp(
-            r_int,
-            static_cast<int>(
-                INT16_MIN),
-            static_cast<int>(
-                INT16_MAX));
-
-    return
-        static_cast<int16_t>(
-            r_int);
+    return static_cast<int16_t>(r_int);
 }
 
 void Synthesizer::renderRealtimeAudio(float *target, int samples) {
