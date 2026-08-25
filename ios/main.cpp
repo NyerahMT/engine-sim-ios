@@ -10,10 +10,194 @@
 #include "../include/sdl_audio_output.h"
 #include "../include/sdl_gpu_renderer.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
+
+/*
+ * iOS-specific EngineSim application driver.
+ *
+ * Upstream EngineSimApplication::tick() deliberately limits the iOS
+ * presentation rate to 60 FPS while idle and ~30 FPS while running.
+ *
+ * That made sense while we were fighting the original performance/audio
+ * problems, but those bottlenecks are gone now.
+ *
+ * This driver keeps:
+ *
+ *   - physics tied to actual elapsed time
+ *   - audio timing unchanged
+ *   - simulation frequency unchanged
+ *
+ * while allowing presentation on every iOS display-link callback.
+ *
+ * On a ProMotion device that means up to 120 FPS.
+ * On a 60 Hz device it naturally remains 60 FPS.
+ */
+class EngineSimIOSApplication final
+    : public EngineSimApplication
+{
+public:
+    bool tickProMotion()
+    {
+        if (m_platform == nullptr) {
+            return false;
+        }
+
+        if (m_lastTick == 0) {
+            m_lastTick =
+                m_platform->ticks();
+        }
+
+        /*
+         * SDL's iOS callback lifecycle is display-link driven.
+         *
+         * Do not impose another software FPS limiter here.
+         */
+        m_platform->pumpEvents();
+
+        if (
+            m_platform->shouldQuit()
+            || m_platform->wasKeyPressed(
+                DesktopKey::Escape))
+        {
+            return false;
+        }
+
+        const std::uint64_t now =
+            m_platform->ticks();
+
+        /*
+         * Physics remains based on REAL elapsed time.
+         *
+         * At 120 Hz this will normally be about 8.3 ms.
+         * At 60 Hz it will normally be about 16.7 ms.
+         *
+         * Therefore 120 FPS does NOT double the amount of simulated
+         * engine time. It simply divides the same real-time simulation
+         * workload into smaller chunks.
+         */
+        const float dt =
+            std::min(
+                static_cast<float>(
+                    now - m_lastTick)
+                    / 1000.0f,
+                0.25f);
+
+        m_lastTick =
+            now;
+
+        if (dt > 0.0f) {
+            m_averageFramerate =
+                0.9f
+                    * m_averageFramerate
+                + 0.1f
+                    / dt;
+        }
+
+        if (
+            m_platform->wasKeyPressed(
+                DesktopKey::F))
+        {
+            toggleFullscreen();
+        }
+
+        if (
+            m_platform->wasKeyPressed(
+                DesktopKey::Tab))
+        {
+            m_screen =
+                (m_screen + 1)
+                % 3;
+        }
+
+        if (
+            m_platform->wasKeyPressed(
+                DesktopKey::Return))
+        {
+            loadScript(
+                m_currentScriptPath);
+        }
+
+        m_screenWidth =
+            m_platform->windowWidth();
+
+        m_screenHeight =
+            m_platform->windowHeight();
+
+        if (dt > 0.0f) {
+            processEngineInput(dt);
+
+            if (
+                !m_paused
+                || m_platform->wasKeyPressed(
+                    DesktopKey::Right))
+            {
+                process(dt);
+            }
+        }
+
+        if (
+            m_engineView
+            != nullptr)
+        {
+            /*
+             * At ProMotion rates the gauge springs now receive smaller,
+             * more frequent time steps. Keep the old hitch protection,
+             * but do not artificially reduce their update rate.
+             */
+            const float uiDt =
+                std::min(
+                    dt,
+                    1.0f / 30.0f);
+
+            m_uiManager.update(
+                uiDt);
+        }
+
+        /*
+         * Engine selection is intentionally deferred until after the UI
+         * update finishes so the picker cannot destroy itself while its
+         * button event is still being dispatched.
+         */
+        if (
+            !m_pendingScriptPath.empty())
+        {
+            const std::string
+                selectedScript =
+                    m_pendingScriptPath;
+
+            m_pendingScriptPath.clear();
+
+            if (
+                loadScript(
+                    selectedScript))
+            {
+                m_currentScriptPath =
+                    selectedScript;
+            }
+        }
+
+        /*
+         * THE PROMOTION CHANGE:
+         *
+         * Render once for every SDL iOS display-link iteration.
+         *
+         * There is deliberately no 8 ms timer here. The display itself is
+         * the clock, which gives us clean pacing at 120/90/80/60 Hz as iOS
+         * dynamically changes the ProMotion refresh rate.
+         */
+        renderScene();
+
+        m_lastRenderTick =
+            now;
+
+        return true;
+    }
+};
 
 struct EngineSimIOSState
 {
@@ -23,7 +207,7 @@ struct EngineSimIOSState
 
     SdlAudioOutput audioOutput;
 
-    EngineSimApplication application;
+    EngineSimIOSApplication application;
 
     bool applicationInitialized =
         false;
@@ -112,22 +296,23 @@ SDL_AppResult SDL_AppInit(
         "\n\n"
         "========================================\n"
         " ENGINE SIMULATOR iOS\n"
-        " Real application host starting\n"
+        " ProMotion application host starting\n"
         "========================================\n");
 
     auto *state =
         new EngineSimIOSState();
 
-    *appstate = state;
+    *appstate =
+        state;
 
     /*
      * Create the SDL-backed native iOS window.
      */
-
-    if (!state->platform.initialize(
-        "EngineSim",
-        1920,
-        1080))
+    if (
+        !state->platform.initialize(
+            "Engine Simulator",
+            1920,
+            1080))
     {
         std::fprintf(
             stderr,
@@ -140,15 +325,8 @@ SDL_AppResult SDL_AppInit(
     }
 
     /*
-     * Resolve the EngineSim asset directory.
-     *
-     * GitHub packaging puts:
-     *
-     * EngineSim.app/
-     * ├── EngineSim
-     * └── assets/
+     * Resolve EngineSim runtime assets.
      */
-
     const RuntimePaths paths =
         RuntimePaths::discover(
             state->platform
@@ -159,20 +337,18 @@ SDL_AppResult SDL_AppInit(
         paths);
 
     /*
-     * Initialize EngineSim's actual SDL GPU renderer.
-     *
-     * On Apple this renderer prefers the MSL shader
-     * files and SDL's Metal backend.
+     * Initialize the real SDL GPU/Metal renderer.
      */
+    const std::filesystem::path
+        shaderDirectory =
+            paths.assetDirectory
+            / "shaders";
 
-    const std::filesystem::path shaderDirectory =
-        paths.assetDirectory
-        / "shaders";
-
-    if (!state->renderer.initialize(
-        state->platform
-            .nativeWindowHandle(),
-        shaderDirectory.string()))
+    if (
+        !state->renderer.initialize(
+            state->platform
+                .nativeWindowHandle(),
+            shaderDirectory.string()))
     {
         std::fprintf(
             stderr,
@@ -190,20 +366,8 @@ SDL_AppResult SDL_AppInit(
         "EngineSim SDL GPU renderer initialized.\n");
 
     /*
-     * This is the moment the real program starts.
-     *
-     * EngineSimApplication::initialize:
-     *
-     * - loads the font
-     * - loads authored meshes
-     * - initializes geometry generation
-     * - loads main.mr
-     * - creates the engine
-     * - creates the simulator
-     * - creates the actual UI
-     * - attaches audio output
+     * Initialize the actual Engine Simulator application.
      */
-
     state->application.initialize(
         &state->platform,
         &state->renderer,
@@ -216,6 +380,7 @@ SDL_AppResult SDL_AppInit(
     std::printf(
         "========================================\n"
         " Real EngineSim application initialized\n"
+        " ProMotion presentation enabled\n"
         "========================================\n");
 
     return SDL_APP_CONTINUE;
@@ -226,8 +391,9 @@ SDL_AppResult SDL_AppEvent(
     SDL_Event *event)
 {
     auto *state =
-        static_cast<EngineSimIOSState *>(
-            appstate);
+        static_cast<
+            EngineSimIOSState *>(
+                appstate);
 
     if (
         state == nullptr
@@ -235,11 +401,6 @@ SDL_AppResult SDL_AppEvent(
     {
         return SDL_APP_CONTINUE;
     }
-
-    /*
-     * Hand SDL's native iOS touch/window events
-     * into the EngineSim platform abstraction.
-     */
 
     state->platform.handleEvent(
         *event);
@@ -258,28 +419,29 @@ SDL_AppResult SDL_AppIterate(
     void *appstate)
 {
     auto *state =
-        static_cast<EngineSimIOSState *>(
-            appstate);
+        static_cast<
+            EngineSimIOSState *>(
+                appstate);
 
     if (
         state == nullptr
-        || !state->applicationInitialized)
+        || !state
+            ->applicationInitialized)
     {
         return SDL_APP_FAILURE;
     }
 
     /*
-     * Drive one frame of REAL EngineSim.
+     * SDL invokes this from its native iOS display-link callback.
      *
-     * This replaces the fake tachometer loop
-     * from our previous milestone.
+     * tickProMotion() renders exactly once per callback.
      */
-
     const bool continueRunning =
-        state->application.tick();
+        state
+            ->application
+            .tickProMotion();
 
-    if (!continueRunning)
-    {
+    if (!continueRunning) {
         return SDL_APP_SUCCESS;
     }
 
@@ -293,34 +455,46 @@ void SDL_AppQuit(
     (void)result;
 
     auto *state =
-        static_cast<EngineSimIOSState *>(
-            appstate);
+        static_cast<
+            EngineSimIOSState *>(
+                appstate);
 
-    if (state == nullptr)
-    {
+    if (state == nullptr) {
         return;
     }
 
     std::printf(
         "EngineSim iOS shutting down.\n");
 
-    if (state->applicationInitialized)
+    if (
+        state
+            ->applicationInitialized)
     {
-        state->application.destroy();
+        state
+            ->application
+            .destroy();
 
-        state->applicationInitialized =
-            false;
+        state
+            ->applicationInitialized =
+                false;
     }
 
-    if (state->rendererInitialized)
+    if (
+        state
+            ->rendererInitialized)
     {
-        state->renderer.shutdown();
+        state
+            ->renderer
+            .shutdown();
 
-        state->rendererInitialized =
-            false;
+        state
+            ->rendererInitialized =
+                false;
     }
 
-    state->platform.shutdown();
+    state
+        ->platform
+        .shutdown();
 
     delete state;
 }
