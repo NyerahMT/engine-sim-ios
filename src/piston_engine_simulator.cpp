@@ -82,6 +82,8 @@ struct DiagnosticLogger {
             << ",runner0_pressure_pa"
             << ",runner0_dynamic_pressure_fwd"
             << ",runner0_dynamic_pressure_rev"
+            << ",raw_exhaust0"
+            << ",delayed_exhaust0"
             << ",audio_stage0"
             << "\n";
 
@@ -132,6 +134,9 @@ diagnosticLogger()
     static DiagnosticLogger logger;
     return logger;
 }
+
+double g_diagRawExhaust0 = 0.0;
+double g_diagDelayedExhaust0 = 0.0;
 
 }
 
@@ -1168,6 +1173,10 @@ PistonEngineSimulator::endFrame()
         << ","
         << runner0DynamicRev
         << ","
+        << g_diagRawExhaust0
+        << ","
+        << g_diagDelayedExhaust0
+        << ","
         << audioStage0
         << "\n";
 
@@ -1391,6 +1400,14 @@ PistonEngineSimulator::writeToSynthesizer()
             m_delayFilters[i]
                 .fast_f(
                     exhaustFlow);
+
+        if (i == 0) {
+            g_diagRawExhaust0 =
+                exhaustFlow;
+
+            g_diagDelayedExhaust0 =
+                delayedExhaustPulse;
+        }
 
         ExhaustSystem *exhaustSystem =
             head->getExhaustSystem(
