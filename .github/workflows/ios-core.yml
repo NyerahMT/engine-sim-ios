@@ -14,28 +14,28 @@ concurrency:
   group: engine-sim-ios-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  BUILD_DIR: build/ios
+  FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
+  BUNDLE_ID: com.nyerahmt.enginesimulator
+  MARKETING_VERSION: 0.1.0
+
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
 jobs:
-  ios:
-    name: EngineSim iPhone App Store
+  build:
+    name: 🔨 Build iOS · 0→55%
     runs-on: macos-15
 
-    env:
-      BUILD_DIR: build/ios
-      FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
-      BUNDLE_ID: com.nyerahmt.enginesimulator
-      MARKETING_VERSION: 0.1.0
-
-      HOMEBREW_NO_AUTO_UPDATE: 1
-      HOMEBREW_NO_INSTALL_CLEANUP: 1
-
     steps:
-      - name: Checkout
+      - name: "[5%] Checkout source"
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Cache SDL3 FetchContent
+      - name: "[10%] Restore SDL3 cache"
         uses: actions/cache@v4
         with:
           path: .cache/fetchcontent
@@ -44,12 +44,12 @@ jobs:
             enginesim-ios-fetchcontent-v2-
             enginesim-ios-fetchcontent-
 
-      - name: Cache incremental iOS build
+      - name: "[15%] Restore incremental build cache"
         uses: actions/cache@v4
         with:
           path: build/ios
           key: >-
-            enginesim-ios-appstore-v1-
+            enginesim-ios-appstore-v2-
             ${{ hashFiles(
               'CMakeLists.txt',
               'ios/CMakeLists.txt',
@@ -58,11 +58,13 @@ jobs:
             ) }}-
             ${{ github.sha }}
           restore-keys: |
-            enginesim-ios-appstore-v1-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
-            enginesim-ios-appstore-v1-
+            enginesim-ios-appstore-v2-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
+            enginesim-ios-appstore-v2-
 
-      - name: Prepare script compiler tools
+      - name: "[20%] Prepare compiler tools"
         run: |
+          set -euo pipefail
+
           if ! brew list bison >/dev/null 2>&1; then
             brew install bison
           fi
@@ -74,11 +76,17 @@ jobs:
           echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
           echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
 
+          echo "Bison:"
           /opt/homebrew/opt/bison/bin/bison --version | head -n 1
+
+          echo
+          echo "Flex:"
           /opt/homebrew/opt/flex/bin/flex --version
 
-      - name: Sanity check
+      - name: "[25%] Validate source tree"
         run: |
+          set -euo pipefail
+
           test -f dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
           test -f dependencies/submodules/csv-io/CMakeLists.txt
           test -f dependencies/submodules/piranha/CMakeLists.txt
@@ -92,8 +100,10 @@ jobs:
 
           echo "EngineSim source tree ready."
 
-      - name: Configure incremental iOS build
+      - name: "[35%] Configure iOS build"
         run: |
+          set -euo pipefail
+
           mkdir -p "$BUILD_DIR"
 
           cmake \
@@ -110,9 +120,13 @@ jobs:
             -DENGINE_SIM_BUILD_SCRIPTING=ON \
             -DBUILD_SHARED_LIBS=OFF
 
-      - name: Build unsigned Release
+      - name: "[50%] Compile Engine Simulator"
         run: |
+          set -euo pipefail
+
           JOBS="$(sysctl -n hw.ncpu)"
+
+          echo "Building with $JOBS parallel jobs."
 
           cmake \
             --build "$BUILD_DIR" \
@@ -123,8 +137,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
-      - name: Locate app
+      - name: "[52%] Locate compiled application"
         run: |
+          set -euo pipefail
+
           APP_PATH="$(
             find "$BUILD_DIR" \
               -type d \
@@ -148,10 +164,123 @@ jobs:
           fi
 
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
-          echo "EngineSim.app: $APP_PATH"
 
-      - name: Apply App Store bundle identity
+          echo "EngineSim.app:"
+          echo "$APP_PATH"
+
+      - name: "[53%] Verify ARM64 build"
         run: |
+          set -euo pipefail
+
+          EXECUTABLE="$APP_PATH/EngineSim"
+
+          test -f "$EXECUTABLE"
+
+          echo "Executable:"
+          file "$EXECUTABLE"
+
+          ARCH="$(lipo -info "$EXECUTABLE")"
+          echo "$ARCH"
+
+          if ! echo "$ARCH" | grep -q arm64; then
+            echo "ERROR: EngineSim executable is not arm64."
+            exit 1
+          fi
+
+          test -f "$APP_PATH/assets/main.mr"
+          test -f "$APP_PATH/assets/fonts/slkscr.ttf"
+          test -f "$APP_PATH/assets/authored_meshes.obj"
+          test -f "$APP_PATH/assets/shaders/engine_sim.vertex.msl"
+          test -f "$APP_PATH/assets/shaders/engine_sim.fragment.msl"
+
+          echo
+          echo "Unsigned ARM64 EngineSim.app validated."
+
+      - name: "[54%] Package unsigned build handoff"
+        run: |
+          set -euo pipefail
+
+          rm -rf handoff
+          mkdir -p handoff
+
+          APP_PARENT="$(dirname "$APP_PATH")"
+          APP_NAME="$(basename "$APP_PATH")"
+
+          tar \
+            -C "$APP_PARENT" \
+            -czf handoff/EngineSim-unsigned.tar.gz \
+            "$APP_NAME"
+
+          echo "Created:"
+          ls -lh handoff/EngineSim-unsigned.tar.gz
+
+      - name: "[55%] Hand build to signing stage"
+        uses: actions/upload-artifact@v4
+        with:
+          name: enginesim-ios-unsigned
+          path: handoff/EngineSim-unsigned.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Build stage summary
+        if: always()
+        run: |
+          {
+            echo "## 🔨 EngineSim iOS Build"
+            echo
+            echo "**Progress:** 55%"
+            echo
+            echo '```text'
+            echo '[███████████---------] 55%'
+            echo '```'
+            echo
+            echo "Unsigned ARM64 iOS application compiled."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sign:
+    name: 🔐 Sign & Package · 55→85%
+    runs-on: macos-15
+    needs:
+      - build
+
+    steps:
+      - name: "[58%] Download compiled application"
+        uses: actions/download-artifact@v4
+        with:
+          name: enginesim-ios-unsigned
+          path: handoff
+
+      - name: "[60%] Restore application bundle"
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/enginesim-unsigned"
+
+          tar \
+            -C "$RUNNER_TEMP/enginesim-unsigned" \
+            -xzf handoff/EngineSim-unsigned.tar.gz
+
+          APP_PATH="$(
+            find "$RUNNER_TEMP/enginesim-unsigned" \
+              -type d \
+              -name 'EngineSim.app' \
+              | head -n 1
+          )"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: EngineSim.app missing after artifact extraction."
+            exit 1
+          fi
+
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+          echo "Restored:"
+          echo "$APP_PATH"
+
+      - name: "[65%] Apply App Store identity"
+        run: |
+          set -euo pipefail
+
           INFO_PLIST="$APP_PATH/Info.plist"
 
           test -f "$INFO_PLIST"
@@ -169,15 +298,23 @@ jobs:
             "$INFO_PLIST"
 
           echo "Bundle ID:"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIdentifier" \
+            "$INFO_PLIST"
 
+          echo
           echo "Version:"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleShortVersionString" \
+            "$INFO_PLIST"
 
+          echo
           echo "Build:"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleVersion" \
+            "$INFO_PLIST"
 
-      - name: Install Apple signing identity
+      - name: "[70%] Install Apple signing identity"
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
@@ -189,6 +326,7 @@ jobs:
           PROFILE_PATH="$RUNNER_TEMP/EngineSim.mobileprovision"
           PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
           ENTITLEMENTS_PATH="$RUNNER_TEMP/entitlements.plist"
+
           KEYCHAIN_PATH="$RUNNER_TEMP/engine-sim-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
 
@@ -256,9 +394,10 @@ jobs:
           EXPECTED_SUFFIX=".$BUNDLE_ID"
 
           if [[ "$PROFILE_APP_ID" != *"$EXPECTED_SUFFIX" ]]; then
-            echo "ERROR: Provisioning profile application identifier is:"
+            echo "ERROR: Provisioning profile application identifier:"
             echo "$PROFILE_APP_ID"
-            echo "Expected it to end with:"
+            echo
+            echo "Expected suffix:"
             echo "$EXPECTED_SUFFIX"
             exit 1
           fi
@@ -286,7 +425,11 @@ jobs:
 
           if [ -z "$SIGNING_IDENTITY" ]; then
             echo "ERROR: Apple Distribution signing identity not found."
-            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            security find-identity \
+              -v \
+              -p codesigning \
+              "$KEYCHAIN_PATH" \
+              || true
             exit 1
           fi
 
@@ -300,7 +443,7 @@ jobs:
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
 
-      - name: Sign Engine Simulator
+      - name: "[75%] Sign Engine Simulator"
         run: |
           set -euo pipefail
 
@@ -309,17 +452,22 @@ jobs:
             "$APP_PATH/embedded.mobileprovision"
 
           if [ -d "$APP_PATH/Frameworks" ]; then
+
             find "$APP_PATH/Frameworks" \
               -type d \
               -name '*.framework' \
               -print0 \
               | while IFS= read -r -d '' FRAMEWORK; do
-                  echo "Signing framework: $FRAMEWORK"
+
+                  echo "Signing framework:"
+                  echo "$FRAMEWORK"
+
                   codesign \
                     --force \
                     --sign "$SIGNING_IDENTITY" \
                     --keychain "$KEYCHAIN_PATH" \
                     "$FRAMEWORK"
+
                 done
 
             find "$APP_PATH/Frameworks" \
@@ -327,12 +475,16 @@ jobs:
               -name '*.dylib' \
               -print0 \
               | while IFS= read -r -d '' DYLIB; do
-                  echo "Signing dylib: $DYLIB"
+
+                  echo "Signing dylib:"
+                  echo "$DYLIB"
+
                   codesign \
                     --force \
                     --sign "$SIGNING_IDENTITY" \
                     --keychain "$KEYCHAIN_PATH" \
                     "$DYLIB"
+
                 done
           fi
 
@@ -344,7 +496,7 @@ jobs:
             --generate-entitlement-der \
             "$APP_PATH"
 
-      - name: Verify signed app
+      - name: "[78%] Verify signed application"
         run: |
           set -euo pipefail
 
@@ -352,8 +504,6 @@ jobs:
 
           test -f "$EXECUTABLE"
           test -f "$APP_PATH/embedded.mobileprovision"
-
-          file "$EXECUTABLE"
 
           ARCH="$(lipo -info "$EXECUTABLE")"
           echo "$ARCH"
@@ -370,7 +520,8 @@ jobs:
           )"
 
           if [ "$FINAL_BUNDLE_ID" != "$BUNDLE_ID" ]; then
-            echo "ERROR: Final bundle ID is $FINAL_BUNDLE_ID"
+            echo "ERROR: Final bundle ID is:"
+            echo "$FINAL_BUNDLE_ID"
             exit 1
           fi
 
@@ -383,6 +534,7 @@ jobs:
 
           echo
           echo "Signing details:"
+
           codesign \
             -d \
             --verbose=4 \
@@ -394,8 +546,10 @@ jobs:
           echo
           echo "Signed Engine Simulator validated."
 
-      - name: Package App Store IPA
+      - name: "[82%] Package App Store IPA"
         run: |
+          set -euo pipefail
+
           rm -rf artifacts
           mkdir -p artifacts/Payload
 
@@ -403,20 +557,134 @@ jobs:
             "$APP_PATH" \
             artifacts/Payload/
 
-          cd artifacts
+          (
+            cd artifacts
 
-          zip \
-            -qry \
-            EngineSim-iOS-AppStore.ipa \
-            Payload
+            zip \
+              -qry \
+              EngineSim-iOS-AppStore.ipa \
+              Payload
+          )
 
           echo "Created:"
-          ls -lh EngineSim-iOS-AppStore.ipa
+          ls -lh artifacts/EngineSim-iOS-AppStore.ipa
 
-      - name: Upload App Store IPA artifact
+      - name: "[85%] Hand IPA to TestFlight stage"
         uses: actions/upload-artifact@v4
         with:
           name: engine-sim-ios-appstore
           path: artifacts/EngineSim-iOS-AppStore.ipa
           if-no-files-found: error
           compression-level: 0
+
+      - name: Signing stage summary
+        if: always()
+        run: |
+          {
+            echo "## 🔐 EngineSim Signing"
+            echo
+            echo "**Progress:** 85%"
+            echo
+            echo '```text'
+            echo '[█████████████████---] 85%'
+            echo '```'
+            echo
+            echo "App Store signed IPA packaged."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  testflight:
+    name: 🚀 TestFlight · 85→100%
+    runs-on: macos-15
+    needs:
+      - sign
+
+    steps:
+      - name: "[88%] Download signed IPA"
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-sim-ios-appstore
+          path: artifacts
+
+      - name: "[90%] Verify TestFlight package"
+        run: |
+          set -euo pipefail
+
+          IPA_PATH="artifacts/EngineSim-iOS-AppStore.ipa"
+
+          test -f "$IPA_PATH"
+
+          echo "IPA ready for Apple:"
+          ls -lh "$IPA_PATH"
+
+      - name: "[93%] Configure App Store Connect authentication"
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APP_STORE_CONNECT_API_KEY"
+          test -n "$APP_STORE_CONNECT_KEY_ID"
+          test -n "$APP_STORE_CONNECT_ISSUER_ID"
+
+          PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
+
+          mkdir -p "$PRIVATE_KEYS_DIR"
+
+          API_KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+
+          printf '%s\n' "$APP_STORE_CONNECT_API_KEY" \
+            > "$API_KEY_PATH"
+
+          chmod 600 "$API_KEY_PATH"
+
+          echo "APP_STORE_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
+
+          echo "App Store Connect authentication prepared."
+
+      - name: "[97%] Upload build to TestFlight"
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+
+          IPA_PATH="artifacts/EngineSim-iOS-AppStore.ipa"
+
+          echo "Uploading Engine Simulator to App Store Connect..."
+
+          xcrun altool \
+            --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: "[99%] Remove temporary App Store key"
+        if: always()
+        run: |
+          if [ -n "${APP_STORE_API_KEY_PATH:-}" ]; then
+            rm -f "$APP_STORE_API_KEY_PATH"
+          fi
+
+      - name: "[100%] TestFlight upload accepted"
+        run: |
+          echo "Engine Simulator upload accepted by App Store Connect."
+          echo "Apple may now take several minutes to process the build."
+
+          {
+            echo "## 🚀 EngineSim TestFlight"
+            echo
+            echo "**Progress:** 100%"
+            echo
+            echo '```text'
+            echo '[████████████████████] 100%'
+            echo '```'
+            echo
+            echo "### ✅ Upload accepted"
+            echo
+            echo "The build has been delivered to App Store Connect."
+            echo
+            echo "Apple may still show the build as Processing before it becomes available in TestFlight."
+          } >> "$GITHUB_STEP_SUMMARY"
