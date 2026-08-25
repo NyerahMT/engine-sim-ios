@@ -25,27 +25,39 @@ Engine::Engine() {
     m_cylinderCount = 0;
     m_intakeCount = 0;
     m_exhaustSystemCount = 0;
+
     m_starterSpeed = 0;
     m_starterTorque = 0;
+
     m_dynoMinSpeed = 0;
     m_dynoMaxSpeed = 0;
     m_dynoHoldStep = 0;
+
     m_redline = 0;
 
     m_throttle = nullptr;
     m_throttleValue = 0.0;
 
-    m_initialSimulationFrequency = 10000.0;
-    m_initialHighFrequencyGain = 0.01;
-    m_initialJitter = 0.5;
-    m_initialNoise = 1.0;
+    m_initialSimulationFrequency =
+        10000.0;
 
-    /*
-     * Community Edition exposes this through the engine script.
-     *
-     * Old OES behavior was hardcoded to 8 in createSimulator().
-     */
-    m_fluidSimulationSteps = 8;
+    m_initialHighFrequencyGain =
+        0.01;
+
+    m_initialJitter =
+        0.5;
+
+    m_initialNoise =
+        1.0;
+
+    m_fluidSimulationSteps =
+        8;
+
+    m_blockTemperature =
+        units::celcius(90.0);
+
+    m_heatTransferCoefficient =
+        100.0;
 }
 
 Engine::~Engine() {
@@ -113,17 +125,29 @@ void Engine::initialize(
     m_initialNoise =
         params.initialNoise;
 
-    /*
-     * CE fluid solver resolution.
-     *
-     * A malformed script must never be allowed to request zero or
-     * negative solver iterations.
-     */
     m_fluidSimulationSteps =
         params.fluidSimulationSteps;
 
-    if (m_fluidSimulationSteps < 1) {
-        m_fluidSimulationSteps = 1;
+    if (
+        m_fluidSimulationSteps
+        < 1)
+    {
+        m_fluidSimulationSteps =
+            1;
+    }
+
+    m_blockTemperature =
+        params.blockTemperature;
+
+    m_heatTransferCoefficient =
+        params.heatTransferCoefficient;
+
+    if (
+        m_heatTransferCoefficient
+        < 0.0)
+    {
+        m_heatTransferCoefficient =
+            0.0;
     }
 
     m_crankshafts =
@@ -224,103 +248,51 @@ void Engine::destroy() {
 
     m_ignitionModule.destroy();
 
-    if (
-        m_throttle
-        != nullptr)
-    {
+    if (m_throttle != nullptr) {
         delete m_throttle;
     }
 
-    if (
-        m_crankshafts
-        != nullptr)
-    {
-        delete[]
-            m_crankshafts;
+    if (m_crankshafts != nullptr) {
+        delete[] m_crankshafts;
     }
 
-    if (
-        m_cylinderBanks
-        != nullptr)
-    {
-        delete[]
-            m_cylinderBanks;
+    if (m_cylinderBanks != nullptr) {
+        delete[] m_cylinderBanks;
     }
 
-    if (
-        m_heads
-        != nullptr)
-    {
-        delete[]
-            m_heads;
+    if (m_heads != nullptr) {
+        delete[] m_heads;
     }
 
-    if (
-        m_pistons
-        != nullptr)
-    {
-        delete[]
-            m_pistons;
+    if (m_pistons != nullptr) {
+        delete[] m_pistons;
     }
 
-    if (
-        m_connectingRods
-        != nullptr)
-    {
-        delete[]
-            m_connectingRods;
+    if (m_connectingRods != nullptr) {
+        delete[] m_connectingRods;
     }
 
-    if (
-        m_exhaustSystems
-        != nullptr)
-    {
-        delete[]
-            m_exhaustSystems;
+    if (m_exhaustSystems != nullptr) {
+        delete[] m_exhaustSystems;
     }
 
-    if (
-        m_intakes
-        != nullptr)
-    {
-        delete[]
-            m_intakes;
+    if (m_intakes != nullptr) {
+        delete[] m_intakes;
     }
 
-    if (
-        m_combustionChambers
-        != nullptr)
-    {
-        delete[]
-            m_combustionChambers;
+    if (m_combustionChambers != nullptr) {
+        delete[] m_combustionChambers;
     }
 
-    m_crankshafts =
-        nullptr;
-
-    m_cylinderBanks =
-        nullptr;
-
-    m_pistons =
-        nullptr;
-
-    m_connectingRods =
-        nullptr;
-
-    m_heads =
-        nullptr;
-
-    m_exhaustSystems =
-        nullptr;
-
-    m_intakes =
-        nullptr;
-
-    m_combustionChambers =
-        nullptr;
-
-    m_throttle =
-        nullptr;
+    m_crankshafts = nullptr;
+    m_cylinderBanks = nullptr;
+    m_pistons = nullptr;
+    m_connectingRods = nullptr;
+    m_heads = nullptr;
+    m_exhaustSystems = nullptr;
+    m_intakes = nullptr;
+    m_combustionChambers = nullptr;
+    m_throttle = nullptr;
 }
 
 Crankshaft *
@@ -401,7 +373,7 @@ bool placeRod(
         rod.getMasterRod()
         != nullptr)
     {
-        double masterS;
+        double master_s;
 
         const bool succeeded =
             placeRod(
@@ -415,7 +387,7 @@ bool placeRod(
                 &p_x_0,
                 &p_y_0,
                 &theta_0,
-                &masterS);
+                &master_s);
 
         if (!succeeded) {
             return false;
@@ -455,12 +427,10 @@ bool placeRod(
     }
 
     const double dx =
-        std::cos(
-            theta_0);
+        std::cos(theta_0);
 
     const double dy =
-        std::sin(
-            theta_0);
+        std::sin(theta_0);
 
     *p_x =
         p_x_0
@@ -525,8 +495,7 @@ bool placeRod(
     }
 
     const double sqrt_det =
-        std::sqrt(
-            det);
+        std::sqrt(det);
 
     const double s0 =
         (
@@ -556,7 +525,7 @@ bool placeRod(
     }
 
     if (s != nullptr) {
-        const double rodDx =
+        const double rod_dx =
             (
                 bank.getX()
                 + bank.getDx()
@@ -564,7 +533,7 @@ bool placeRod(
             )
             - (*p_x);
 
-        const double rodDy =
+        const double rod_dy =
             (
                 bank.getY()
                 + bank.getDy()
@@ -574,23 +543,16 @@ bool placeRod(
 
         *theta =
             (
-                rodDy > 0
+                rod_dy > 0
             )
-            ? std::acos(
-                rodDx)
-            : -std::acos(
-                rodDx);
+            ? std::acos(rod_dx)
+            : -std::acos(rod_dx);
     }
 
     return true;
 }
 
 void Engine::calculateDisplacement() {
-    /*
-     * There is a closed-form/correct way to do this which I really
-     * don't feel like deriving right now, so I'm just going with this
-     * numerical approximation.
-     */
     constexpr int Resolution =
         1000;
 
@@ -679,8 +641,7 @@ void Engine::calculateDisplacement() {
         }
     }
 
-    double displacement =
-        0;
+    double displacement = 0;
 
     for (
         int i = 0;
@@ -723,8 +684,7 @@ void Engine::calculateDisplacement() {
 double
 Engine::getIntakeFlowRate() const
 {
-    double airIntake =
-        0;
+    double airIntake = 0;
 
     for (
         int i = 0;
@@ -751,8 +711,7 @@ void Engine::update(
 double
 Engine::getManifoldPressure() const
 {
-    double pressureSum =
-        0.0;
+    double pressureSum = 0.0;
 
     for (
         int i = 0;
@@ -773,11 +732,8 @@ Engine::getManifoldPressure() const
 double
 Engine::getIntakeAfr() const
 {
-    double totalOxygen =
-        0.0;
-
-    double totalFuel =
-        0.0;
+    double totalOxygen = 0.0;
+    double totalFuel = 0.0;
 
     for (
         int i = 0;
@@ -824,14 +780,9 @@ Engine::getIntakeAfr() const
 double
 Engine::getExhaustO2() const
 {
-    double totalInert =
-        0.0;
-
-    double totalOxygen =
-        0.0;
-
-    double totalFuel =
-        0.0;
+    double totalInert = 0.0;
+    double totalOxygen = 0.0;
+    double totalFuel = 0.0;
 
     for (
         int i = 0;
@@ -905,8 +856,7 @@ Engine::resetFuelConsumption()
 double
 Engine::getTotalFuelMassConsumed() const
 {
-    double n_fuelConsumed =
-        0;
+    double n_fuelConsumed = 0;
 
     for (
         int i = 0;
@@ -934,8 +884,7 @@ Engine::getTotalVolumeFuelConsumed() const
 }
 
 int Engine::getMaxDepth() const {
-    int maxDepth =
-        0;
+    int maxDepth = 0;
 
     for (
         int i = 0;
@@ -961,8 +910,7 @@ Engine::createSimulator(
     PistonEngineSimulator *simulator =
         new PistonEngineSimulator;
 
-    Simulator::Parameters
-        simulatorParams;
+    Simulator::Parameters simulatorParams;
 
     simulatorParams.systemType =
         Simulator::SystemType
@@ -980,13 +928,6 @@ Engine::createSimulator(
         vehicle,
         transmission);
 
-    /*
-     * This used to be:
-     *
-     *     setFluidSimulationSteps(8)
-     *
-     * CE scripts can now control the real value.
-     */
     simulator
         ->setFluidSimulationSteps(
             m_fluidSimulationSteps);
