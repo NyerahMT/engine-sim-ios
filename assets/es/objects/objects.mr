@@ -85,7 +85,8 @@ public node engine_parameters {
      * Defaults reproduce the old OES behavior.
      */
     input fluid_simulation_steps: 8;
-    input block_temperature: 90 * units.C;
+    input block_temperature:
+        units.K0 + 90 * units.C;
     input heat_transfer_coefficient: 100.0;
 }
 
