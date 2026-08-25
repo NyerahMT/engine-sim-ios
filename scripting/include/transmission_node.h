@@ -9,41 +9,87 @@
 
 namespace es_script {
 
-    class TransmissionNode : public ObjectReferenceNode<TransmissionNode> {
-    public:
-        TransmissionNode() { /* void */ }
-        virtual ~TransmissionNode() { /* void */ }
+class TransmissionNode
+    : public ObjectReferenceNode<
+        TransmissionNode>
+{
+public:
+    TransmissionNode() {
+    }
 
-        void generate(Transmission *transmission) const {
-            Transmission::Parameters parameters = m_parameters;
-            parameters.GearCount = static_cast<int>(m_gears.size());
-            parameters.GearRatios = m_gears.data();
+    virtual ~TransmissionNode() {
+    }
 
-            transmission->initialize(parameters);
-        }
+    void generate(
+        Transmission *transmission) const
+    {
+        Transmission::Parameters
+            parameters =
+                m_parameters;
 
-        void addGear(double ratio) {
-            m_gears.push_back(ratio);
-        }
+        parameters.GearCount =
+            static_cast<int>(
+                m_gears.size());
 
-    protected:
-        virtual void registerInputs() {
-            addInput("max_clutch_torque", &m_parameters.MaxClutchTorque);
+        parameters.GearRatios =
+            m_gears.data();
 
-            ObjectReferenceNode<TransmissionNode>::registerInputs();
-        }
+        transmission->initialize(
+            parameters);
+    }
 
-        virtual void _evaluate() {
-            setOutput(this);
+    void addGear(
+        double ratio)
+    {
+        m_gears.push_back(
+            ratio);
+    }
 
-            // Read inputs
-            readAllInputs();
-        }
+protected:
+    virtual void registerInputs() {
+        addInput(
+            "max_clutch_torque",
+            &m_parameters
+                .MaxClutchTorque);
 
-        Transmission::Parameters m_parameters;
-        std::vector<double> m_gears;
-    };
+        addInput(
+            "max_clutch_flex",
+            &m_parameters
+                .MaxClutchFlex);
 
-} /* namespace es_script */
+        addInput(
+            "limit_clutch_flex",
+            &m_parameters
+                .LimitClutchFlex);
 
-#endif /* ATG_ENGINE_SIM_TRANSMISSION_NODE_H */
+        addInput(
+            "clutch_stiffness",
+            &m_parameters
+                .ClutchStiffness);
+
+        addInput(
+            "clutch_damping",
+            &m_parameters
+                .ClutchDamping);
+
+        ObjectReferenceNode<
+            TransmissionNode>
+            ::registerInputs();
+    }
+
+    virtual void _evaluate() {
+        setOutput(this);
+
+        readAllInputs();
+    }
+
+    Transmission::Parameters
+        m_parameters;
+
+    std::vector<double>
+        m_gears;
+};
+
+}
+
+#endif
