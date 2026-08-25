@@ -124,11 +124,30 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF
 
 
-      - name: Build
+      #
+      # IMPORTANT PERFORMANCE CHANGE
+      #
+      # Previous on-device builds were Debug.
+      #
+      # EngineSim performs:
+      #
+      # - combustion simulation
+      # - crank / piston physics
+      # - synthesizer generation
+      # - procedural UI geometry
+      # - hundreds of thousands of potential vertices
+      # - gauge spring simulation
+      #
+      # Debug disables most compiler optimization.
+      #
+      # Release lets Clang optimize the real ARM64 code.
+      #
+
+      - name: Build Release
         run: |
           cmake \
             --build "$BUILD_DIR" \
-            --config Debug \
+            --config Release \
             --target EngineSimIOS \
             --parallel 3 \
             -- \
@@ -141,9 +160,21 @@ jobs:
           APP_PATH="$(
             find "$BUILD_DIR" \
               -type d \
+              -path '*Release-iphoneos*' \
               -name 'EngineSim.app' \
               | head -n 1
           )"
+
+          if [ -z "$APP_PATH" ]; then
+
+            APP_PATH="$(
+              find "$BUILD_DIR" \
+                -type d \
+                -name 'EngineSim.app' \
+                | head -n 1
+            )"
+
+          fi
 
           if [ -z "$APP_PATH" ]; then
 
@@ -162,12 +193,13 @@ jobs:
             "EngineSim.app: $APP_PATH"
 
 
-      - name: Validate real EngineSim build
+      - name: Validate Release EngineSim build
         run: |
           EXECUTABLE="$APP_PATH/EngineSim"
 
           test -f \
             "$EXECUTABLE"
+
 
           echo \
             "================================"
@@ -198,6 +230,31 @@ jobs:
               "ERROR: executable is not arm64."
 
             exit 1
+
+          fi
+
+
+          echo
+          echo \
+            "================================"
+
+          echo \
+            "Release optimization"
+
+          echo \
+            "================================"
+
+          if echo "$APP_PATH" \
+            | grep -q 'Release-iphoneos'
+          then
+
+            echo \
+              "Release iPhoneOS configuration confirmed."
+
+          else
+
+            echo \
+              "WARNING: app path does not contain Release-iphoneos."
 
           fi
 
@@ -244,9 +301,21 @@ jobs:
           SCRIPTING_LIBRARY="$(
             find "$BUILD_DIR" \
               -type f \
+              -path '*Release*' \
               -name 'libengine-sim-scripting.a' \
               | head -n 1
           )"
+
+          if [ -z "$SCRIPTING_LIBRARY" ]; then
+
+            SCRIPTING_LIBRARY="$(
+              find "$BUILD_DIR" \
+                -type f \
+                -name 'libengine-sim-scripting.a' \
+                | head -n 1
+            )"
+
+          fi
 
           if [ -z "$SCRIPTING_LIBRARY" ]; then
 
@@ -275,9 +344,21 @@ jobs:
           VIS_LIBRARY="$(
             find "$BUILD_DIR" \
               -type f \
+              -path '*Release*' \
               -name 'libengine-sim-visualization.a' \
               | head -n 1
           )"
+
+          if [ -z "$VIS_LIBRARY" ]; then
+
+            VIS_LIBRARY="$(
+              find "$BUILD_DIR" \
+                -type f \
+                -name 'libengine-sim-visualization.a' \
+                | head -n 1
+            )"
+
+          fi
 
           if [ -z "$VIS_LIBRARY" ]; then
 
@@ -314,7 +395,16 @@ jobs:
 
           echo
           echo \
-            "REAL ENGINESIM iOS BUILD COMPLETE."
+            "================================"
+
+          echo \
+            "SUCCESS"
+
+          echo \
+            "================================"
+
+          echo \
+            "Release ARM64 EngineSim iOS build complete."
 
 
       - name: Package IPA
@@ -337,10 +427,19 @@ jobs:
           =============
 
           Milestone:
-          Real EngineSim application
+          Real EngineSim optimized build
 
           Platform:
-          iPhoneOS arm64
+          iPhoneOS
+
+          Architecture:
+          arm64
+
+          Configuration:
+          Release
+
+          Compiler optimization:
+          enabled
 
           Real EngineSim application:
           enabled
@@ -355,7 +454,7 @@ jobs:
           enabled
 
           Metal shaders:
-          bundled
+          enabled
 
           Touch input:
           enabled
@@ -366,20 +465,26 @@ jobs:
           App icon:
           enabled
 
+          iOS Metal compatibility path:
+          enabled
+
           Signing:
           disabled
 
-          Expected result:
-          Actual Engine Simulator
-          interface and simulation.
+          Test targets:
+          - FPS
+          - audio continuity
+          - gauge stability
+          - simulation responsiveness
           EOF
+
 
           cd \
             artifacts
 
           zip \
             -qr \
-            EngineSim-iOS-unsigned.ipa \
+            EngineSim-iOS-Release-unsigned.ipa \
             Payload \
             BUILD_INFO.txt
 
@@ -387,9 +492,9 @@ jobs:
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: engine-sim-ios-real
+          name: engine-sim-ios-release
           path: |
-            artifacts/EngineSim-iOS-unsigned.ipa
+            artifacts/EngineSim-iOS-Release-unsigned.ipa
             artifacts/BUILD_INFO.txt
           if-no-files-found: error
           compression-level: 1
