@@ -31,15 +31,15 @@ public:
     void buildEngine(
         Engine *engine)
     {
-        int cylinderCount =
-            0;
+        int cylinderCount = 0;
 
         for (
             const CylinderBankNode *bank
                 : m_cylinderBanks)
         {
             cylinderCount +=
-                bank->getCylinderCount();
+                bank
+                    ->getCylinderCount();
         }
 
         std::set<ExhaustSystemNode *>
@@ -53,7 +53,8 @@ public:
                 : m_cylinderBanks)
         {
             const int n =
-                bank->getCylinderCount();
+                bank
+                    ->getCylinderCount();
 
             for (
                 int i = 0;
@@ -73,6 +74,7 @@ public:
         }
 
         EngineContext context;
+
         context.setEngine(
             engine);
 
@@ -99,14 +101,14 @@ public:
                 intakes.size());
 
         parameters.throttle =
-            m_throttle->generate();
+            m_throttle
+                ->generate();
 
         engine->initialize(
             parameters);
 
         {
-            int i =
-                0;
+            int i = 0;
 
             for (
                 ExhaustSystemNode *exhaust
@@ -121,8 +123,7 @@ public:
         }
 
         {
-            int i =
-                0;
+            int i = 0;
 
             for (
                 IntakeNode *intake
@@ -137,8 +138,7 @@ public:
         }
 
         {
-            int i =
-                0;
+            int i = 0;
 
             for (
                 const CylinderBankNode *bank
@@ -238,11 +238,13 @@ public:
         }
 
         Fuel *fuel =
-            engine->getFuel();
+            engine
+                ->getFuel();
 
-        m_fuel->generate(
-            fuel,
-            &context);
+        m_fuel
+            ->generate(
+                fuel,
+                &context);
 
         CombustionChamber::Parameters
             ccParams;
@@ -267,19 +269,31 @@ public:
         ccParams.MeanPistonSpeedToTurbulence =
             meanPistonSpeedToTurbulence;
 
+        ccParams.BlockTemperature =
+            parameters
+                .blockTemperature;
+
+        ccParams.HeatTransferCoefficient =
+            parameters
+                .heatTransferCoefficient;
+
         for (
             int i = 0;
-            i < engine->getCylinderCount();
+            i < engine
+                ->getCylinderCount();
             ++i)
         {
             ccParams.Piston =
-                engine->getPiston(i);
+                engine
+                    ->getPiston(i);
 
             ccParams.Head =
-                engine->getHead(
-                    ccParams.Piston
-                        ->getCylinderBank()
-                        ->getIndex());
+                engine
+                    ->getHead(
+                        ccParams
+                            .Piston
+                            ->getCylinderBank()
+                            ->getIndex());
 
             engine
                 ->getChamber(i)
@@ -291,24 +305,27 @@ public:
     void addCrankshaft(
         CrankshaftNode *crankshaft)
     {
-        m_crankshafts.push_back(
-            crankshaft);
+        m_crankshafts
+            .push_back(
+                crankshaft);
     }
 
     void addCylinderBank(
         CylinderBankNode *bank)
     {
-        m_cylinderBanks.push_back(
-            bank);
+        m_cylinderBanks
+            .push_back(
+                bank);
     }
 
     int
     getIgnitionModuleCount() const
     {
         return
-            m_ignitionModule == nullptr
-                ? 0
-                : 1;
+            m_ignitionModule
+                == nullptr
+            ? 0
+            : 1;
     }
 
     void addIgnitionModule(
@@ -327,27 +344,33 @@ protected:
 
         addInput(
             "starter_torque",
-            &m_parameters.starterTorque);
+            &m_parameters
+                .starterTorque);
 
         addInput(
             "starter_speed",
-            &m_parameters.starterSpeed);
+            &m_parameters
+                .starterSpeed);
 
         addInput(
             "dyno_min_speed",
-            &m_parameters.dynoMinSpeed);
+            &m_parameters
+                .dynoMinSpeed);
 
         addInput(
             "dyno_max_speed",
-            &m_parameters.dynoMaxSpeed);
+            &m_parameters
+                .dynoMaxSpeed);
 
         addInput(
             "dyno_hold_step",
-            &m_parameters.dynoHoldStep);
+            &m_parameters
+                .dynoHoldStep);
 
         addInput(
             "redline",
-            &m_parameters.redline);
+            &m_parameters
+                .redline);
 
         addInput(
             "fuel",
@@ -379,16 +402,20 @@ protected:
             &m_parameters
                 .initialNoise);
 
-        /*
-         * Community Edition.
-         *
-         * Unlike the compatibility shim we were using before,
-         * this value now reaches the actual PistonEngineSimulator.
-         */
         addInput(
             "fluid_simulation_steps",
             &m_parameters
                 .fluidSimulationSteps);
+
+        addInput(
+            "block_temperature",
+            &m_parameters
+                .blockTemperature);
+
+        addInput(
+            "heat_transfer_coefficient",
+            &m_parameters
+                .heatTransferCoefficient);
 
         ObjectReferenceNode<
             EngineNode>
@@ -401,10 +428,6 @@ protected:
 
         readAllInputs();
 
-        /*
-         * Don't allow malformed downloaded scripts to produce zero
-         * fluid iterations or an absurd negative value.
-         */
         if (
             m_parameters
                 .fluidSimulationSteps
@@ -413,6 +436,16 @@ protected:
             m_parameters
                 .fluidSimulationSteps =
                     1;
+        }
+
+        if (
+            m_parameters
+                .heatTransferCoefficient
+            < 0.0)
+        {
+            m_parameters
+                .heatTransferCoefficient =
+                    0.0;
         }
     }
 
@@ -436,6 +469,6 @@ protected:
         m_cylinderBanks;
 };
 
-} /* namespace es_script */
+}
 
-#endif /* ATG_ENGINE_SIM_ENGINE_NODE_H */
+#endif
