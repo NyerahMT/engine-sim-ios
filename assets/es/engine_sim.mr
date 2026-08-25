@@ -31,3 +31,35 @@ public import "utilities/utilities.mr"
 
 // Application settings
 public import "settings/application_settings.mr"
+
+/*
+ * --------------------------------------------------------------------------
+ * Legacy / community engine compatibility
+ * --------------------------------------------------------------------------
+ *
+ * Older Engine Simulator scripts commonly use:
+ *
+ *     run(
+ *         engine: some_engine(),
+ *         transmission: some_transmission(),
+ *         vehicle: some_vehicle()
+ *     )
+ *
+ * Modern Open Engine Simulator exposes the individual actions instead:
+ *
+ *     set_engine(...)
+ *     set_vehicle(...)
+ *     set_transmission(...)
+ *
+ * Keep the old API as a compatibility wrapper so downloaded engines from
+ * older Engine Simulator versions can run unchanged.
+ */
+public node run {
+    input engine;
+    input transmission;
+    input vehicle;
+
+    set_engine(engine)
+    set_vehicle(vehicle)
+    set_transmission(transmission)
+}
