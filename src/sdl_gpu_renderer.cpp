@@ -4,16 +4,178 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 
 namespace {
 
+namespace fs = std::filesystem;
+
 constexpr int MaxVertices = 500000;
 constexpr int MaxIndices = 1000000;
+
+/*
+ * ============================================================
+ * Persistent renderer diagnostic logger
+ * ============================================================
+ *
+ * Writes into the same file used by ios/main.cpp:
+ *
+ *     Documents/engine-sim.log
+ *
+ * The renderer has its own append handle so we can see exactly
+ * how far SDL GPU / Metal gets before a crash or abort.
+ */
+
+FILE *g_rendererLogFile =
+    nullptr;
+
+std::uint64_t rendererLogStartMs =
+    0;
+
+std::uint64_t rendererMonotonicMilliseconds()
+{
+    using namespace std::chrono;
+
+    return static_cast<std::uint64_t>(
+        duration_cast<milliseconds>(
+            steady_clock::now()
+                .time_since_epoch())
+            .count());
+}
+
+void openRendererDiagnosticLog()
+{
+    if (g_rendererLogFile != nullptr)
+    {
+        return;
+    }
+
+    const char *home =
+        std::getenv("HOME");
+
+    if (
+        home == nullptr
+        || home[0] == '\0')
+    {
+        return;
+    }
+
+    const fs::path path =
+        fs::path(home)
+        / "Documents"
+        / "engine-sim.log";
+
+    std::error_code error;
+
+    fs::create_directories(
+        path.parent_path(),
+        error);
+
+    g_rendererLogFile =
+        std::fopen(
+            path.string().c_str(),
+            "a");
+
+    if (g_rendererLogFile == nullptr)
+    {
+        return;
+    }
+
+    std::setvbuf(
+        g_rendererLogFile,
+        nullptr,
+        _IONBF,
+        0);
+
+    rendererLogStartMs =
+        rendererMonotonicMilliseconds();
+
+    std::fprintf(
+        g_rendererLogFile,
+        "[GPU-LOG ] Renderer diagnostic logger attached.\n");
+
+    std::fflush(
+        g_rendererLogFile);
+}
+
+void closeRendererDiagnosticLog()
+{
+    if (g_rendererLogFile == nullptr)
+    {
+        return;
+    }
+
+    std::fprintf(
+        g_rendererLogFile,
+        "[GPU-LOG ] Renderer diagnostic logger closing.\n");
+
+    std::fflush(
+        g_rendererLogFile);
+
+    std::fclose(
+        g_rendererLogFile);
+
+    g_rendererLogFile =
+        nullptr;
+}
+
+void rendererDiagnosticLog(
+    const char *format,
+    ...)
+{
+    if (g_rendererLogFile == nullptr)
+    {
+        openRendererDiagnosticLog();
+    }
+
+    if (g_rendererLogFile == nullptr)
+    {
+        return;
+    }
+
+    const std::uint64_t now =
+        rendererMonotonicMilliseconds();
+
+    const std::uint64_t elapsed =
+        now >= rendererLogStartMs
+            ? now - rendererLogStartMs
+            : 0;
+
+    std::fprintf(
+        g_rendererLogFile,
+        "[GPU +%6llu ms] ",
+        static_cast<unsigned long long>(
+            elapsed));
+
+    va_list args;
+
+    va_start(
+        args,
+        format);
+
+    std::vfprintf(
+        g_rendererLogFile,
+        format,
+        args);
+
+    va_end(args);
+
+    std::fprintf(
+        g_rendererLogFile,
+        "\n");
+
+    std::fflush(
+        g_rendererLogFile);
+}
 
 std::vector<std::uint8_t> loadBinaryFile(
     const std::string &path)
@@ -23,16 +185,21 @@ std::vector<std::uint8_t> loadBinaryFile(
         std::ios::binary | std::ios::ate);
 
     if (!file)
+    {
         return {};
+    }
 
     const std::streamsize size =
         file.tellg();
 
     if (size <= 0)
+    {
         return {};
+    }
 
     std::vector<std::uint8_t> data(
-        static_cast<std::size_t>(size));
+        static_cast<std::size_t>(
+            size));
 
     file.seekg(0);
 
@@ -52,7 +219,8 @@ SDL_GPUShaderFormat selectedShaderFormat(
     const char **extension)
 {
     const SDL_GPUShaderFormat formats =
-        SDL_GetGPUShaderFormats(device);
+        SDL_GetGPUShaderFormats(
+            device);
 
 #if defined(__APPLE__)
 
@@ -60,9 +228,11 @@ SDL_GPUShaderFormat selectedShaderFormat(
         (formats & SDL_GPU_SHADERFORMAT_MSL)
         != 0)
     {
-        *extension = "msl";
+        *extension =
+            "msl";
 
-        return SDL_GPU_SHADERFORMAT_MSL;
+        return
+            SDL_GPU_SHADERFORMAT_MSL;
     }
 
 #endif
@@ -71,32 +241,40 @@ SDL_GPUShaderFormat selectedShaderFormat(
         (formats & SDL_GPU_SHADERFORMAT_SPIRV)
         != 0)
     {
-        *extension = "spv";
+        *extension =
+            "spv";
 
-        return SDL_GPU_SHADERFORMAT_SPIRV;
+        return
+            SDL_GPU_SHADERFORMAT_SPIRV;
     }
 
     if (
         (formats & SDL_GPU_SHADERFORMAT_DXIL)
         != 0)
     {
-        *extension = "dxil";
+        *extension =
+            "dxil";
 
-        return SDL_GPU_SHADERFORMAT_DXIL;
+        return
+            SDL_GPU_SHADERFORMAT_DXIL;
     }
 
     if (
         (formats & SDL_GPU_SHADERFORMAT_MSL)
         != 0)
     {
-        *extension = "msl";
+        *extension =
+            "msl";
 
-        return SDL_GPU_SHADERFORMAT_MSL;
+        return
+            SDL_GPU_SHADERFORMAT_MSL;
     }
 
-    *extension = nullptr;
+    *extension =
+        nullptr;
 
-    return SDL_GPU_SHADERFORMAT_INVALID;
+    return
+        SDL_GPU_SHADERFORMAT_INVALID;
 }
 
 }
@@ -130,17 +308,42 @@ SdlGpuRenderer::SdlGpuRenderer()
       m_sceneViewportWidth(0.0f),
       m_sceneViewportHeight(0.0f)
 {
+    openRendererDiagnosticLog();
+
+    rendererDiagnosticLog(
+        "SdlGpuRenderer constructor.");
 }
 
 SdlGpuRenderer::~SdlGpuRenderer()
 {
+    rendererDiagnosticLog(
+        "SdlGpuRenderer destructor ENTER.");
+
     shutdown();
+
+    rendererDiagnosticLog(
+        "SdlGpuRenderer destructor END.");
+
+    closeRendererDiagnosticLog();
 }
 
 bool SdlGpuRenderer::initialize(
     void *nativeWindowHandle,
     const std::string &shaderDirectory)
 {
+    openRendererDiagnosticLog();
+
+    rendererDiagnosticLog(
+        "initialize ENTER.");
+
+    rendererDiagnosticLog(
+        "nativeWindowHandle=%p",
+        nativeWindowHandle);
+
+    rendererDiagnosticLog(
+        "shaderDirectory=%s",
+        shaderDirectory.c_str());
+
     m_error.clear();
 
     m_window =
@@ -151,12 +354,14 @@ bool SdlGpuRenderer::initialize(
         m_error =
             "SDL window handle is null";
 
+        rendererDiagnosticLog(
+            "initialize FAIL: window is NULL.");
+
         return false;
     }
 
-    /*
-     * Prefer Metal Shader Language on Apple.
-     */
+    rendererDiagnosticLog(
+        "SDL_CreateGPUDevice BEGIN.");
 
     m_gpuDevice =
         SDL_CreateGPUDevice(
@@ -166,12 +371,40 @@ bool SdlGpuRenderer::initialize(
             true,
             nullptr);
 
-    if (
-        m_gpuDevice == nullptr
-        || !SDL_ClaimWindowForGPUDevice(
+    rendererDiagnosticLog(
+        "SDL_CreateGPUDevice END device=%p error=%s",
+        static_cast<void *>(
+            m_gpuDevice),
+        SDL_GetError());
+
+    if (m_gpuDevice == nullptr)
+    {
+        m_error =
+            SDL_GetError();
+
+        rendererDiagnosticLog(
+            "initialize FAIL: GPU device NULL.");
+
+        shutdown();
+
+        return false;
+    }
+
+    rendererDiagnosticLog(
+        "SDL_ClaimWindowForGPUDevice BEGIN.");
+
+    const bool claimResult =
+        SDL_ClaimWindowForGPUDevice(
             m_gpuDevice,
             static_cast<SDL_Window *>(
-                m_window)))
+                m_window));
+
+    rendererDiagnosticLog(
+        "SDL_ClaimWindowForGPUDevice END result=%d error=%s",
+        claimResult ? 1 : 0,
+        SDL_GetError());
+
+    if (!claimResult)
     {
         m_error =
             SDL_GetError();
@@ -233,25 +466,52 @@ bool SdlGpuRenderer::initialize(
         0
     };
 
+    rendererDiagnosticLog(
+        "Creating GPU vertex/index buffers.");
+
     m_vertexBuffer =
         SDL_CreateGPUBuffer(
             m_gpuDevice,
             &vertexBufferInfo);
+
+    rendererDiagnosticLog(
+        "vertexBuffer=%p error=%s",
+        static_cast<void *>(
+            m_vertexBuffer),
+        SDL_GetError());
 
     m_indexBuffer =
         SDL_CreateGPUBuffer(
             m_gpuDevice,
             &indexBufferInfo);
 
+    rendererDiagnosticLog(
+        "indexBuffer=%p error=%s",
+        static_cast<void *>(
+            m_indexBuffer),
+        SDL_GetError());
+
     m_vertexTransferBuffer =
         SDL_CreateGPUTransferBuffer(
             m_gpuDevice,
             &vertexTransferInfo);
 
+    rendererDiagnosticLog(
+        "vertexTransferBuffer=%p error=%s",
+        static_cast<void *>(
+            m_vertexTransferBuffer),
+        SDL_GetError());
+
     m_indexTransferBuffer =
         SDL_CreateGPUTransferBuffer(
             m_gpuDevice,
             &indexTransferInfo);
+
+    rendererDiagnosticLog(
+        "indexTransferBuffer=%p error=%s",
+        static_cast<void *>(
+            m_indexTransferBuffer),
+        SDL_GetError());
 
     if (
         m_vertexBuffer == nullptr
@@ -261,6 +521,9 @@ bool SdlGpuRenderer::initialize(
     {
         m_error =
             SDL_GetError();
+
+        rendererDiagnosticLog(
+            "initialize FAIL: geometry buffer creation.");
 
         shutdown();
 
@@ -279,6 +542,14 @@ bool SdlGpuRenderer::initialize(
             m_gpuDevice,
             &extension);
 
+    rendererDiagnosticLog(
+        "Selected shader format=%u extension=%s",
+        static_cast<unsigned>(
+            shaderFormat),
+        extension != nullptr
+            ? extension
+            : "(null)");
+
     if (
         shaderFormat
         == SDL_GPU_SHADERFORMAT_INVALID)
@@ -286,24 +557,51 @@ bool SdlGpuRenderer::initialize(
         m_error =
             SDL_GetError();
 
+        rendererDiagnosticLog(
+            "initialize FAIL: no shader format.");
+
         shutdown();
 
         return false;
     }
 
+    const std::string vertexPath =
+        shaderDirectory
+        + "/engine_sim.vertex."
+        + extension;
+
+    const std::string fragmentPath =
+        shaderDirectory
+        + "/engine_sim.fragment."
+        + extension;
+
+    rendererDiagnosticLog(
+        "Loading vertex shader: %s",
+        vertexPath.c_str());
+
     const std::vector<std::uint8_t>
         vertexCode =
             loadBinaryFile(
-                shaderDirectory
-                + "/engine_sim.vertex."
-                + extension);
+                vertexPath);
+
+    rendererDiagnosticLog(
+        "Vertex shader bytes=%llu",
+        static_cast<unsigned long long>(
+            vertexCode.size()));
+
+    rendererDiagnosticLog(
+        "Loading fragment shader: %s",
+        fragmentPath.c_str());
 
     const std::vector<std::uint8_t>
         fragmentCode =
             loadBinaryFile(
-                shaderDirectory
-                + "/engine_sim.fragment."
-                + extension);
+                fragmentPath);
+
+    rendererDiagnosticLog(
+        "Fragment shader bytes=%llu",
+        static_cast<unsigned long long>(
+            fragmentCode.size()));
 
     if (
         vertexCode.empty()
@@ -312,6 +610,9 @@ bool SdlGpuRenderer::initialize(
         m_error =
             "Missing SDL GPU shader artifacts in "
             + shaderDirectory;
+
+        rendererDiagnosticLog(
+            "initialize FAIL: shader file empty.");
 
         shutdown();
 
@@ -356,15 +657,33 @@ bool SdlGpuRenderer::initialize(
         0
     };
 
+    rendererDiagnosticLog(
+        "SDL_CreateGPUShader vertex BEGIN.");
+
     SDL_GPUShader *vertexShader =
         SDL_CreateGPUShader(
             m_gpuDevice,
             &vertexInfo);
 
+    rendererDiagnosticLog(
+        "SDL_CreateGPUShader vertex END shader=%p error=%s",
+        static_cast<void *>(
+            vertexShader),
+        SDL_GetError());
+
+    rendererDiagnosticLog(
+        "SDL_CreateGPUShader fragment BEGIN.");
+
     SDL_GPUShader *fragmentShader =
         SDL_CreateGPUShader(
             m_gpuDevice,
             &fragmentInfo);
+
+    rendererDiagnosticLog(
+        "SDL_CreateGPUShader fragment END shader=%p error=%s",
+        static_cast<void *>(
+            fragmentShader),
+        SDL_GetError());
 
     if (
         vertexShader == nullptr
@@ -386,6 +705,9 @@ bool SdlGpuRenderer::initialize(
                 m_gpuDevice,
                 fragmentShader);
         }
+
+        rendererDiagnosticLog(
+            "initialize FAIL: shader creation.");
 
         shutdown();
 
@@ -455,6 +777,11 @@ bool SdlGpuRenderer::initialize(
             static_cast<SDL_Window *>(
                 m_window));
 
+    rendererDiagnosticLog(
+        "Swapchain format=%u",
+        static_cast<unsigned>(
+            colorTarget.format));
+
     colorTarget.blend_state.enable_blend =
         true;
 
@@ -476,10 +803,6 @@ bool SdlGpuRenderer::initialize(
     colorTarget.blend_state.alpha_blend_op =
         SDL_GPU_BLENDOP_ADD;
 
-    /*
-     * Base graphics pipeline.
-     */
-
     SDL_GPUGraphicsPipelineCreateInfo
         pipelineInfo = {};
 
@@ -500,22 +823,6 @@ bool SdlGpuRenderer::initialize(
 
     pipelineInfo.primitive_type =
         SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-
-    /*
-     * IMPORTANT:
-     *
-     * iOS Metal validation rejected the previous
-     * D16 depth-enabled pipeline when it was bound
-     * to the first real EngineSim render pass.
-     *
-     * EngineSim already explicitly sorts geometry
-     * by render layer, so the iOS bring-up path can
-     * safely run without a depth attachment.
-     *
-     * We can restore depth later with a Metal-native
-     * attachment format once the entire application
-     * is stable.
-     */
 
 #if defined(ENGINE_SIM_IOS)
 
@@ -558,18 +865,19 @@ bool SdlGpuRenderer::initialize(
 
 #endif
 
-    /*
-     * Scene pipeline.
-     */
+    rendererDiagnosticLog(
+        "SDL_CreateGPUGraphicsPipeline scene BEGIN.");
 
     m_scenePipeline =
         SDL_CreateGPUGraphicsPipeline(
             m_gpuDevice,
             &pipelineInfo);
 
-    /*
-     * UI never needs depth.
-     */
+    rendererDiagnosticLog(
+        "SDL_CreateGPUGraphicsPipeline scene END pipeline=%p error=%s",
+        static_cast<void *>(
+            m_scenePipeline),
+        SDL_GetError());
 
     pipelineInfo.target_info.depth_stencil_format =
         SDL_GPU_TEXTUREFORMAT_INVALID;
@@ -579,10 +887,19 @@ bool SdlGpuRenderer::initialize(
 
     pipelineInfo.depth_stencil_state = {};
 
+    rendererDiagnosticLog(
+        "SDL_CreateGPUGraphicsPipeline UI BEGIN.");
+
     m_uiPipeline =
         SDL_CreateGPUGraphicsPipeline(
             m_gpuDevice,
             &pipelineInfo);
+
+    rendererDiagnosticLog(
+        "SDL_CreateGPUGraphicsPipeline UI END pipeline=%p error=%s",
+        static_cast<void *>(
+            m_uiPipeline),
+        SDL_GetError());
 
     if (
         m_scenePipeline == nullptr
@@ -610,6 +927,9 @@ bool SdlGpuRenderer::initialize(
                 "SDL GPU graphics pipeline creation failed";
         }
 
+        rendererDiagnosticLog(
+            "initialize FAIL: pipeline creation.");
+
         shutdown();
 
         return false;
@@ -625,11 +945,20 @@ bool SdlGpuRenderer::initialize(
 
 #endif
 
+    rendererDiagnosticLog(
+        "initialize SUCCESS.");
+
     return true;
 }
 
 void SdlGpuRenderer::shutdown()
 {
+    rendererDiagnosticLog(
+        "shutdown ENTER device=%p window=%p",
+        static_cast<void *>(
+            m_gpuDevice),
+        m_window);
+
     if (m_gpuDevice != nullptr)
     {
         if (m_scenePipeline != nullptr)
@@ -688,23 +1017,41 @@ void SdlGpuRenderer::shutdown()
                 m_indexBuffer);
         }
 
-        m_vertexTransferBuffer = nullptr;
-        m_indexTransferBuffer = nullptr;
+        m_vertexTransferBuffer =
+            nullptr;
 
-        m_vertexBuffer = nullptr;
-        m_indexBuffer = nullptr;
+        m_indexTransferBuffer =
+            nullptr;
 
-        m_scenePipeline = nullptr;
-        m_uiPipeline = nullptr;
+        m_vertexBuffer =
+            nullptr;
 
-        m_sceneTexture = nullptr;
-        m_depthTexture = nullptr;
+        m_indexBuffer =
+            nullptr;
 
-        m_sceneTextureWidth = 0;
-        m_sceneTextureHeight = 0;
+        m_scenePipeline =
+            nullptr;
 
-        m_depthTextureWidth = 0;
-        m_depthTextureHeight = 0;
+        m_uiPipeline =
+            nullptr;
+
+        m_sceneTexture =
+            nullptr;
+
+        m_depthTexture =
+            nullptr;
+
+        m_sceneTextureWidth =
+            0;
+
+        m_sceneTextureHeight =
+            0;
+
+        m_depthTextureWidth =
+            0;
+
+        m_depthTextureHeight =
+            0;
 
         if (m_window != nullptr)
         {
@@ -717,10 +1064,15 @@ void SdlGpuRenderer::shutdown()
         SDL_DestroyGPUDevice(
             m_gpuDevice);
 
-        m_gpuDevice = nullptr;
+        m_gpuDevice =
+            nullptr;
     }
 
-    m_window = nullptr;
+    m_window =
+        nullptr;
+
+    rendererDiagnosticLog(
+        "shutdown END.");
 }
 
 void SdlGpuRenderer::beginFrame(
@@ -779,6 +1131,11 @@ void SdlGpuRenderer::uploadGeometry(
         || indexCount < 0
         || indexCount > MaxIndices)
     {
+        rendererDiagnosticLog(
+            "uploadGeometry REJECTED vertices=%d indices=%d",
+            vertexCount,
+            indexCount);
+
         return;
     }
 
@@ -827,35 +1184,130 @@ void SdlGpuRenderer::submitGeometry(
 
 void SdlGpuRenderer::endFrame()
 {
+    static std::uint64_t frameNumber =
+        0;
+
+    ++frameNumber;
+
+    const bool verboseFrame =
+        frameNumber <= 20
+        || (frameNumber % 120) == 0;
+
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "============================================================");
+
+        rendererDiagnosticLog(
+            "GPU FRAME %llu ENTER",
+            static_cast<unsigned long long>(
+                frameNumber));
+
+        rendererDiagnosticLog(
+            "state device=%p window=%p vertices=%d indices=%d submissions=%llu",
+            static_cast<void *>(
+                m_gpuDevice),
+            m_window,
+            m_vertexCount,
+            m_indexCount,
+            static_cast<unsigned long long>(
+                m_submissions.size()));
+
+        rendererDiagnosticLog(
+            "scene viewport x=%.1f y=%.1f w=%.1f h=%.1f",
+            static_cast<double>(
+                m_sceneViewportX),
+            static_cast<double>(
+                m_sceneViewportY),
+            static_cast<double>(
+                m_sceneViewportWidth),
+            static_cast<double>(
+                m_sceneViewportHeight));
+    }
+
     if (
         m_gpuDevice == nullptr
         || m_window == nullptr)
     {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu ABORT: null device/window.",
+            static_cast<unsigned long long>(
+                frameNumber));
+
         return;
+    }
+
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_AcquireGPUCommandBuffer BEGIN",
+            static_cast<unsigned long long>(
+                frameNumber));
     }
 
     SDL_GPUCommandBuffer *commands =
         SDL_AcquireGPUCommandBuffer(
             m_gpuDevice);
 
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_AcquireGPUCommandBuffer END commands=%p error=%s",
+            static_cast<unsigned long long>(
+                frameNumber),
+            static_cast<void *>(
+                commands),
+            SDL_GetError());
+    }
+
     if (commands == nullptr)
     {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu ABORT: command buffer NULL.",
+            static_cast<unsigned long long>(
+                frameNumber));
+
         return;
     }
 
     /*
-     * Upload generated EngineSim geometry.
+     * ========================================================
+     * Upload generated EngineSim geometry
+     * ========================================================
      */
 
     if (
         m_vertexCount > 0
         && m_indexCount > 0)
     {
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: map vertex transfer BEGIN",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
+
         void *vertexUpload =
             SDL_MapGPUTransferBuffer(
                 m_gpuDevice,
                 m_vertexTransferBuffer,
                 true);
+
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: map vertex transfer END ptr=%p error=%s",
+                static_cast<unsigned long long>(
+                    frameNumber),
+                vertexUpload,
+                SDL_GetError());
+
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: map index transfer BEGIN",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
 
         void *indexUpload =
             SDL_MapGPUTransferBuffer(
@@ -863,10 +1315,28 @@ void SdlGpuRenderer::endFrame()
                 m_indexTransferBuffer,
                 true);
 
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: map index transfer END ptr=%p error=%s",
+                static_cast<unsigned long long>(
+                    frameNumber),
+                indexUpload,
+                SDL_GetError());
+        }
+
         if (
             vertexUpload != nullptr
             && indexUpload != nullptr)
         {
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: memcpy geometry BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+
             std::memcpy(
                 vertexUpload,
                 m_vertices,
@@ -882,29 +1352,88 @@ void SdlGpuRenderer::endFrame()
                 sizeof(std::uint16_t)
                 * static_cast<std::size_t>(
                     m_indexCount));
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: memcpy geometry END",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
         }
 
         if (vertexUpload != nullptr)
         {
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: unmap vertex BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+
             SDL_UnmapGPUTransferBuffer(
                 m_gpuDevice,
                 m_vertexTransferBuffer);
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: unmap vertex END",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
         }
 
         if (indexUpload != nullptr)
         {
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: unmap index BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+
             SDL_UnmapGPUTransferBuffer(
                 m_gpuDevice,
                 m_indexTransferBuffer);
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: unmap index END",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
         }
 
         if (
             vertexUpload != nullptr
             && indexUpload != nullptr)
         {
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: SDL_BeginGPUCopyPass BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+
             SDL_GPUCopyPass *copyPass =
                 SDL_BeginGPUCopyPass(
                     commands);
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: SDL_BeginGPUCopyPass END pass=%p error=%s",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<void *>(
+                        copyPass),
+                    SDL_GetError());
+            }
 
             if (copyPass != nullptr)
             {
@@ -944,11 +1473,32 @@ void SdlGpuRenderer::endFrame()
                         * m_indexCount)
                 };
 
+                if (verboseFrame)
+                {
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SDL_UploadToGPUBuffer VERTEX BEGIN",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+                }
+
                 SDL_UploadToGPUBuffer(
                     copyPass,
                     &vertexSource,
                     &vertexDestination,
                     true);
+
+                if (verboseFrame)
+                {
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SDL_UploadToGPUBuffer VERTEX END",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SDL_UploadToGPUBuffer INDEX BEGIN",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+                }
 
                 SDL_UploadToGPUBuffer(
                     copyPass,
@@ -956,14 +1506,44 @@ void SdlGpuRenderer::endFrame()
                     &indexDestination,
                     true);
 
+                if (verboseFrame)
+                {
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SDL_UploadToGPUBuffer INDEX END",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SDL_EndGPUCopyPass BEGIN",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+                }
+
                 SDL_EndGPUCopyPass(
                     copyPass);
+
+                if (verboseFrame)
+                {
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SDL_EndGPUCopyPass END",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+                }
             }
         }
     }
+    else if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: geometry upload skipped.",
+            static_cast<unsigned long long>(
+                frameNumber));
+    }
 
     /*
-     * Acquire the real iPhone Metal swapchain texture.
+     * ========================================================
+     * Acquire Metal swapchain texture
+     * ========================================================
      */
 
     SDL_GPUTexture *swapchainTexture =
@@ -975,31 +1555,75 @@ void SdlGpuRenderer::endFrame()
     Uint32 swapchainHeight =
         0;
 
-    if (
-        !SDL_WaitAndAcquireGPUSwapchainTexture(
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_WaitAndAcquireGPUSwapchainTexture BEGIN",
+            static_cast<unsigned long long>(
+                frameNumber));
+    }
+
+    const bool acquired =
+        SDL_WaitAndAcquireGPUSwapchainTexture(
             commands,
             static_cast<SDL_Window *>(
                 m_window),
             &swapchainTexture,
             &swapchainWidth,
-            &swapchainHeight))
+            &swapchainHeight);
+
+    if (verboseFrame)
     {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_WaitAndAcquireGPUSwapchainTexture END result=%d texture=%p size=%ux%u error=%s",
+            static_cast<unsigned long long>(
+                frameNumber),
+            acquired ? 1 : 0,
+            static_cast<void *>(
+                swapchainTexture),
+            swapchainWidth,
+            swapchainHeight,
+            SDL_GetError());
+    }
+
+    if (!acquired)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_CancelGPUCommandBuffer BEGIN",
+            static_cast<unsigned long long>(
+                frameNumber));
+
         SDL_CancelGPUCommandBuffer(
             commands);
+
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_CancelGPUCommandBuffer END",
+            static_cast<unsigned long long>(
+                frameNumber));
 
         return;
     }
 
     if (swapchainTexture == nullptr)
     {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: swapchain texture NULL, submitting empty command buffer.",
+            static_cast<unsigned long long>(
+                frameNumber));
+
         SDL_SubmitGPUCommandBuffer(
             commands);
+
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: empty command buffer submitted.",
+            static_cast<unsigned long long>(
+                frameNumber));
 
         return;
     }
 
     /*
-     * Helper: issue EngineSim submissions for one stage.
+     * Helper: draw one EngineSim render stage.
      */
 
     const auto drawStage =
@@ -1035,10 +1659,45 @@ void SdlGpuRenderer::endFrame()
                     < right->layer;
             });
 
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: drawStage stage=0x%08x submissions=%llu",
+                static_cast<unsigned long long>(
+                    frameNumber),
+                static_cast<unsigned>(
+                    stage),
+                static_cast<unsigned long long>(
+                    submissions.size()));
+        }
+
+        std::size_t drawNumber =
+            0;
+
         for (
             const Submission *submission
             : submissions)
         {
+            ++drawNumber;
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: DRAW %llu/%llu BEGIN layer=%d baseVertex=%d baseIndex=%d faces=%d stage=0x%08x",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<unsigned long long>(
+                        drawNumber),
+                    static_cast<unsigned long long>(
+                        submissions.size()),
+                    submission->layer,
+                    submission->baseVertex,
+                    submission->baseIndex,
+                    submission->faceCount,
+                    static_cast<unsigned>(
+                        submission->stage));
+            }
+
             const ysMatrix transforms[] =
             {
                 submission->transform,
@@ -1046,17 +1705,61 @@ void SdlGpuRenderer::endFrame()
                 submission->projection
             };
 
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: DRAW %llu vertex uniform BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<unsigned long long>(
+                        drawNumber));
+            }
+
             SDL_PushGPUVertexUniformData(
                 commands,
                 0,
                 transforms,
                 sizeof(transforms));
 
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: DRAW %llu vertex uniform END",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<unsigned long long>(
+                        drawNumber));
+
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: DRAW %llu fragment uniform BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<unsigned long long>(
+                        drawNumber));
+            }
+
             SDL_PushGPUFragmentUniformData(
                 commands,
                 0,
                 &submission->color,
                 sizeof(submission->color));
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: DRAW %llu fragment uniform END",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<unsigned long long>(
+                        drawNumber));
+
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: DRAW %llu SDL_DrawGPUIndexedPrimitives BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<unsigned long long>(
+                        drawNumber));
+            }
 
             SDL_DrawGPUIndexedPrimitives(
                 pass,
@@ -1073,6 +1776,16 @@ void SdlGpuRenderer::endFrame()
                 submission->baseVertex,
 
                 0);
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: DRAW %llu SDL_DrawGPUIndexedPrimitives END",
+                    static_cast<unsigned long long>(
+                        frameNumber),
+                    static_cast<unsigned long long>(
+                        drawNumber));
+            }
         }
     };
 
@@ -1080,9 +1793,27 @@ void SdlGpuRenderer::endFrame()
         [&](SDL_GPURenderPass *pass,
             SDL_GPUGraphicsPipeline *pipeline)
     {
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_BindGPUGraphicsPipeline BEGIN pipeline=%p",
+                static_cast<unsigned long long>(
+                    frameNumber),
+                static_cast<void *>(
+                    pipeline));
+        }
+
         SDL_BindGPUGraphicsPipeline(
             pass,
             pipeline);
+
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_BindGPUGraphicsPipeline END",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
 
         const SDL_GPUBufferBinding
             vertexBinding =
@@ -1098,16 +1829,45 @@ void SdlGpuRenderer::endFrame()
             0
         };
 
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_BindGPUVertexBuffers BEGIN",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
+
         SDL_BindGPUVertexBuffers(
             pass,
             0,
             &vertexBinding,
             1);
 
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_BindGPUVertexBuffers END",
+                static_cast<unsigned long long>(
+                    frameNumber));
+
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_BindGPUIndexBuffer BEGIN",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
+
         SDL_BindGPUIndexBuffer(
             pass,
             &indexBinding,
             SDL_GPU_INDEXELEMENTSIZE_16BIT);
+
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_BindGPUIndexBuffer END",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
     };
 
 #if defined(ENGINE_SIM_IOS)
@@ -1116,12 +1876,6 @@ void SdlGpuRenderer::endFrame()
      * ========================================================
      * iOS Metal path
      * ========================================================
-     *
-     * Render directly into the swapchain.
-     *
-     * This deliberately avoids the D16 offscreen/depth pass
-     * that caused Metal validation to SIGABRT on the first
-     * real EngineSim frame.
      */
 
     SDL_GPUColorTargetInfo
@@ -1144,6 +1898,14 @@ void SdlGpuRenderer::endFrame()
     colorTarget.store_op =
         SDL_GPU_STOREOP_STORE;
 
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_BeginGPURenderPass BEGIN",
+            static_cast<unsigned long long>(
+                frameNumber));
+    }
+
     SDL_GPURenderPass *pass =
         SDL_BeginGPURenderPass(
             commands,
@@ -1151,10 +1913,21 @@ void SdlGpuRenderer::endFrame()
             1,
             nullptr);
 
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_BeginGPURenderPass END pass=%p error=%s",
+            static_cast<unsigned long long>(
+                frameNumber),
+            static_cast<void *>(
+                pass),
+            SDL_GetError());
+    }
+
     if (pass != nullptr)
     {
         /*
-         * Real EngineSim mechanical scene.
+         * Mechanical scene.
          */
 
         if (
@@ -1162,9 +1935,25 @@ void SdlGpuRenderer::endFrame()
             && m_vertexCount > 0
             && m_indexCount > 0)
         {
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: SCENE bindGeometry BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+
             bindGeometry(
                 pass,
                 m_scenePipeline);
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: SCENE bindGeometry END",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
 
             if (
                 m_sceneViewportWidth > 0.0f
@@ -1182,18 +1971,61 @@ void SdlGpuRenderer::endFrame()
                     1.0f
                 };
 
+                if (verboseFrame)
+                {
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SCENE SDL_SetGPUViewport BEGIN",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+                }
+
                 SDL_SetGPUViewport(
                     pass,
                     &viewport);
+
+                if (verboseFrame)
+                {
+                    rendererDiagnosticLog(
+                        "GPU FRAME %llu: SCENE SDL_SetGPUViewport END",
+                        static_cast<unsigned long long>(
+                            frameNumber));
+                }
+            }
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: SCENE drawStage BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
             }
 
             drawStage(
                 pass,
                 Shaders::SceneStage);
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: SCENE drawStage END",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+        }
+        else if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SCENE skipped pipeline=%p vertices=%d indices=%d",
+                static_cast<unsigned long long>(
+                    frameNumber),
+                static_cast<void *>(
+                    m_scenePipeline),
+                m_vertexCount,
+                m_indexCount);
         }
 
         /*
-         * Restore full-window viewport before UI.
+         * Restore full-screen viewport before UI.
          */
 
         SDL_GPUViewport fullViewport =
@@ -1211,12 +2043,28 @@ void SdlGpuRenderer::endFrame()
             1.0f
         };
 
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: FULL SDL_SetGPUViewport BEGIN",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
+
         SDL_SetGPUViewport(
             pass,
             &fullViewport);
 
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: FULL SDL_SetGPUViewport END",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
+
         /*
-         * Real EngineSim gauges / oscilloscope / text / UI.
+         * UI.
          */
 
         if (
@@ -1224,24 +2072,87 @@ void SdlGpuRenderer::endFrame()
             && m_vertexCount > 0
             && m_indexCount > 0)
         {
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: UI bindGeometry BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+
             bindGeometry(
                 pass,
                 m_uiPipeline);
 
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: UI bindGeometry END",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: UI drawStage BEGIN",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+
             drawStage(
                 pass,
                 Shaders::UiStage);
+
+            if (verboseFrame)
+            {
+                rendererDiagnosticLog(
+                    "GPU FRAME %llu: UI drawStage END",
+                    static_cast<unsigned long long>(
+                        frameNumber));
+            }
+        }
+        else if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: UI skipped pipeline=%p vertices=%d indices=%d",
+                static_cast<unsigned long long>(
+                    frameNumber),
+                static_cast<void *>(
+                    m_uiPipeline),
+                m_vertexCount,
+                m_indexCount);
+        }
+
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_EndGPURenderPass BEGIN",
+                static_cast<unsigned long long>(
+                    frameNumber));
         }
 
         SDL_EndGPURenderPass(
             pass);
+
+        if (verboseFrame)
+        {
+            rendererDiagnosticLog(
+                "GPU FRAME %llu: SDL_EndGPURenderPass END",
+                static_cast<unsigned long long>(
+                    frameNumber));
+        }
+    }
+    else
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: render pass NULL.",
+            static_cast<unsigned long long>(
+                frameNumber));
     }
 
 #else
 
     /*
      * ========================================================
-     * Existing desktop path
+     * Desktop path
      * ========================================================
      */
 
@@ -1557,8 +2468,35 @@ void SdlGpuRenderer::endFrame()
 
 #endif
 
-    SDL_SubmitGPUCommandBuffer(
-        commands);
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_SubmitGPUCommandBuffer BEGIN",
+            static_cast<unsigned long long>(
+                frameNumber));
+    }
+
+    const bool submitResult =
+        SDL_SubmitGPUCommandBuffer(
+            commands);
+
+    if (verboseFrame)
+    {
+        rendererDiagnosticLog(
+            "GPU FRAME %llu: SDL_SubmitGPUCommandBuffer END result=%d error=%s",
+            static_cast<unsigned long long>(
+                frameNumber),
+            submitResult ? 1 : 0,
+            SDL_GetError());
+
+        rendererDiagnosticLog(
+            "GPU FRAME %llu END",
+            static_cast<unsigned long long>(
+                frameNumber));
+
+        rendererDiagnosticLog(
+            "============================================================");
+    }
 }
 
 const char *SdlGpuRenderer::lastError() const
