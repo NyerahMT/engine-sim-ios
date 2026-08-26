@@ -9,9 +9,9 @@ class Gauge : public UiElement {
     public:
         struct Band {
             ysVector color = ysMath::Constants::One;
-            float start = 0.0;
-            float end = 0.0;
-            float width = 0.0;
+            float start = 0.0f;
+            float end = 0.0f;
+            float width = 0.0f;
             float radial_offset = 0.0f;
             float shorten_start = 0.0f;
             float shorten_end = 0.0f;
@@ -27,8 +27,13 @@ class Gauge : public UiElement {
         virtual void update(float dt);
         virtual void render();
 
-        void setBandCount(int bands) { m_bands.resize(bands); }
-        void setBand(const Band &band, int index) { m_bands[index] = band; }
+        void setBandCount(int bands) {
+            m_bands.resize(bands);
+        }
+
+        void setBand(const Band &band, int index) {
+            m_bands[index] = band;
+        }
 
         float m_value;
         float m_thetaMin;
@@ -37,10 +42,12 @@ class Gauge : public UiElement {
         float m_min;
         float m_max;
         int m_maxMinorTick;
+
         float m_gamma;
 
-        int m_minorStep;
-        int m_majorStep;
+        // Gauge spacing may be fractional.
+        float m_minorStep;
+        float m_majorStep;
 
         float m_minorTickWidth;
         float m_majorTickWidth;
