@@ -13,9 +13,7 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cmath>
-#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -26,38 +24,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-/*
- * ============================================================
- * Persistent diagnostic logger
- * ============================================================
- *
- * Written to:
- *
- *     Documents/engine-sim.log
- *
- * Every line is flushed immediately so the log survives a crash,
- * watchdog termination, or force-close as well as possible.
- */
-
-FILE *g_logFile =
-    nullptr;
-
-std::uint64_t g_logStartMs =
-    0;
-
-std::uint64_t monotonicMilliseconds()
-{
-    using namespace std::chrono;
-
-    return static_cast<std::uint64_t>(
-        duration_cast<milliseconds>(
-            steady_clock::now()
-                .time_since_epoch())
-            .count());
-}
-
-fs::path documentsDirectory()
-{
+fs::path customEngineDirectory() {
     const char *home =
         std::getenv("HOME");
 
@@ -70,163 +37,7 @@ fs::path documentsDirectory()
 
     return
         fs::path(home)
-        / "Documents";
-}
-
-fs::path diagnosticLogPath()
-{
-    const fs::path documents =
-        documentsDirectory();
-
-    if (documents.empty()) {
-        return {};
-    }
-
-    return
-        documents
-        / "engine-sim.log";
-}
-
-void diagnosticLog(
-    const char *format,
-    ...)
-{
-    if (g_logFile == nullptr) {
-        return;
-    }
-
-    const std::uint64_t now =
-        monotonicMilliseconds();
-
-    const std::uint64_t elapsed =
-        now >= g_logStartMs
-            ? now - g_logStartMs
-            : 0;
-
-    std::fprintf(
-        g_logFile,
-        "[%8llu ms] ",
-        static_cast<unsigned long long>(
-            elapsed));
-
-    va_list args;
-
-    va_start(
-        args,
-        format);
-
-    std::vfprintf(
-        g_logFile,
-        format,
-        args);
-
-    va_end(args);
-
-    std::fprintf(
-        g_logFile,
-        "\n");
-
-    /*
-     * Critical for a diagnostic build:
-     * never leave important startup information sitting in stdio buffers.
-     */
-    std::fflush(
-        g_logFile);
-}
-
-void openDiagnosticLog()
-{
-    g_logStartMs =
-        monotonicMilliseconds();
-
-    const fs::path path =
-        diagnosticLogPath();
-
-    if (path.empty()) {
-        return;
-    }
-
-    std::error_code error;
-
-    fs::create_directories(
-        path.parent_path(),
-        error);
-
-    /*
-     * Append instead of replacing.
-     *
-     * That means repeated failed launches remain visible in one file,
-     * separated by SESSION START banners.
-     */
-    g_logFile =
-        std::fopen(
-            path.string().c_str(),
-            "a");
-
-    if (g_logFile == nullptr) {
-        return;
-    }
-
-    std::setvbuf(
-        g_logFile,
-        nullptr,
-        _IONBF,
-        0);
-
-    std::fprintf(
-        g_logFile,
-        "\n\n"
-        "============================================================\n"
-        " ENGINE SIMULATOR iOS DIAGNOSTIC SESSION START\n"
-        "============================================================\n");
-
-    std::fflush(
-        g_logFile);
-
-    diagnosticLog(
-        "Persistent logger opened.");
-
-    diagnosticLog(
-        "Log path: %s",
-        path.string().c_str());
-}
-
-void closeDiagnosticLog()
-{
-    if (g_logFile == nullptr) {
-        return;
-    }
-
-    diagnosticLog(
-        "Diagnostic session closing.");
-
-    std::fprintf(
-        g_logFile,
-        "============================================================\n"
-        " ENGINE SIMULATOR iOS DIAGNOSTIC SESSION END\n"
-        "============================================================\n");
-
-    std::fflush(
-        g_logFile);
-
-    std::fclose(
-        g_logFile);
-
-    g_logFile =
-        nullptr;
-}
-
-fs::path customEngineDirectory()
-{
-    const fs::path documents =
-        documentsDirectory();
-
-    if (documents.empty()) {
-        return {};
-    }
-
-    return
-        documents
+        / "Documents"
         / "Custom Engines";
 }
 
@@ -252,21 +63,16 @@ bool isMrFile(
 /*
  * Copy a document handed to us by iOS into the application's permanent
  * custom-engine directory.
+ *
+ * If the file is already there, simply return the existing path.
  */
 fs::path importEngineFile(
     const fs::path &source)
 {
-    diagnosticLog(
-        "importEngineFile entered: %s",
-        source.string().c_str());
-
     if (
         source.empty()
         || !isMrFile(source))
     {
-        diagnosticLog(
-            "Import rejected: empty path or non-.mr file.");
-
         return {};
     }
 
@@ -278,10 +84,6 @@ fs::path importEngineFile(
             error)
         || error)
     {
-        diagnosticLog(
-            "Import source missing. error=%s",
-            error.message().c_str());
-
         std::fprintf(
             stderr,
             "Custom engine import: source does not exist: %s\n",
@@ -294,9 +96,6 @@ fs::path importEngineFile(
         customEngineDirectory();
 
     if (customRoot.empty()) {
-        diagnosticLog(
-            "Import failed: custom engine directory unavailable.");
-
         return {};
     }
 
@@ -305,10 +104,6 @@ fs::path importEngineFile(
         error);
 
     if (error) {
-        diagnosticLog(
-            "Import directory creation failed: %s",
-            error.message().c_str());
-
         std::fprintf(
             stderr,
             "Custom engine import: could not create directory: %s\n",
@@ -317,6 +112,10 @@ fs::path importEngineFile(
         return {};
     }
 
+    /*
+     * If Files already handed us something inside Custom Engines,
+     * don't make another copy.
+     */
     std::error_code canonicalError;
 
     const fs::path canonicalSource =
@@ -340,9 +139,6 @@ fs::path importEngineFile(
                 0)
                 == 0)
     {
-        diagnosticLog(
-            "Import source already inside Custom Engines.");
-
         return canonicalSource;
     }
 
@@ -350,6 +146,10 @@ fs::path importEngineFile(
         customRoot
         / source.filename();
 
+    /*
+     * Don't silently overwrite an existing engine with a different
+     * downloaded file.
+     */
     if (
         fs::exists(
             destination,
@@ -399,10 +199,6 @@ fs::path importEngineFile(
         error);
 
     if (error) {
-        diagnosticLog(
-            "Import copy failed: %s",
-            error.message().c_str());
-
         std::fprintf(
             stderr,
             "Custom engine import failed: %s\n",
@@ -410,10 +206,6 @@ fs::path importEngineFile(
 
         return {};
     }
-
-    diagnosticLog(
-        "Engine import succeeded: %s",
-        destination.string().c_str());
 
     std::printf(
         "Imported custom engine:\n%s\n",
@@ -425,31 +217,31 @@ fs::path importEngineFile(
 }
 
 /*
- * ============================================================
- * iOS EngineSim application
- * ============================================================
+ * iOS-specific EngineSim application driver.
+ *
+ * Physics/audio remain tied to real elapsed time while rendering follows
+ * the native iOS display-link cadence, allowing ProMotion displays to run
+ * up to 120 Hz.
  */
-
 class EngineSimIOSApplication final
     : public EngineSimApplication
 {
 public:
 
+    /*
+     * Reset our wall-clock frame timer after returning from the
+     * background.
+     *
+     * Without this, the first foreground frame can inherit the entire
+     * suspension interval as its elapsed time. The normal dt clamp protects
+     * physics, but resetting the clock is cleaner and avoids artificial
+     * FPS/timing spikes.
+     */
     void resetFrameClock()
     {
-        diagnosticLog(
-            "resetFrameClock entered.");
-
         if (m_platform == nullptr) {
-            diagnosticLog(
-                "resetFrameClock: platform is NULL.");
-
-            m_lastTick =
-                0;
-
-            m_lastRenderTick =
-                0;
-
+            m_lastTick = 0;
+            m_lastRenderTick = 0;
             return;
         }
 
@@ -461,80 +253,26 @@ public:
 
         m_lastRenderTick =
             now;
-
-        diagnosticLog(
-            "resetFrameClock complete. ticks=%llu",
-            static_cast<unsigned long long>(
-                now));
     }
 
     bool tickProMotion()
     {
-        ++m_diagnosticFrameNumber;
-
-        const bool verboseFrame =
-            m_diagnosticFrameNumber <= 20
-            || (
-                m_diagnosticFrameNumber
-                % 120
-                == 0);
-
-        if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: tickProMotion ENTER",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
-        }
-
         if (m_platform == nullptr) {
-            diagnosticLog(
-                "FRAME %llu: platform NULL.",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
-
             return false;
         }
 
         if (m_lastTick == 0) {
             m_lastTick =
                 m_platform->ticks();
-
-            if (verboseFrame) {
-                diagnosticLog(
-                    "FRAME %llu: initialized m_lastTick=%llu",
-                    static_cast<unsigned long long>(
-                        m_diagnosticFrameNumber),
-                    static_cast<unsigned long long>(
-                        m_lastTick));
-            }
-        }
-
-        if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: pumpEvents BEGIN",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
         }
 
         m_platform->pumpEvents();
-
-        if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: pumpEvents END",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
-        }
 
         if (
             m_platform->shouldQuit()
             || m_platform->wasKeyPressed(
                 DesktopKey::Escape))
         {
-            diagnosticLog(
-                "FRAME %llu: quit requested.",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
-
             return false;
         }
 
@@ -563,9 +301,6 @@ public:
             m_platform->wasKeyPressed(
                 DesktopKey::F))
         {
-            diagnosticLog(
-                "Fullscreen toggle requested.");
-
             toggleFullscreen();
         }
 
@@ -582,10 +317,6 @@ public:
             m_platform->wasKeyPressed(
                 DesktopKey::Return))
         {
-            diagnosticLog(
-                "Reload script requested: %s",
-                m_currentScriptPath.c_str());
-
             loadScript(
                 m_currentScriptPath);
         }
@@ -596,58 +327,15 @@ public:
         m_screenHeight =
             m_platform->windowHeight();
 
-        if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: dt=%.6f, window=%dx%d, avgFPS=%.2f",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber),
-                static_cast<double>(
-                    dt),
-                m_screenWidth,
-                m_screenHeight,
-                static_cast<double>(
-                    m_averageFramerate));
-        }
-
         if (dt > 0.0f) {
-            if (verboseFrame) {
-                diagnosticLog(
-                    "FRAME %llu: processEngineInput BEGIN",
-                    static_cast<unsigned long long>(
-                        m_diagnosticFrameNumber));
-            }
-
-            processEngineInput(
-                dt);
-
-            if (verboseFrame) {
-                diagnosticLog(
-                    "FRAME %llu: processEngineInput END",
-                    static_cast<unsigned long long>(
-                        m_diagnosticFrameNumber));
-            }
+            processEngineInput(dt);
 
             if (
                 !m_paused
                 || m_platform->wasKeyPressed(
                     DesktopKey::Right))
             {
-                if (verboseFrame) {
-                    diagnosticLog(
-                        "FRAME %llu: simulation process BEGIN",
-                        static_cast<unsigned long long>(
-                            m_diagnosticFrameNumber));
-                }
-
-                process(
-                    dt);
-
-                if (verboseFrame) {
-                    diagnosticLog(
-                        "FRAME %llu: simulation process END",
-                        static_cast<unsigned long long>(
-                            m_diagnosticFrameNumber));
-                }
+                process(dt);
             }
         }
 
@@ -660,30 +348,14 @@ public:
                     dt,
                     1.0f / 30.0f);
 
-            if (verboseFrame) {
-                diagnosticLog(
-                    "FRAME %llu: UI update BEGIN",
-                    static_cast<unsigned long long>(
-                        m_diagnosticFrameNumber));
-            }
-
             m_uiManager.update(
                 uiDt);
-
-            if (verboseFrame) {
-                diagnosticLog(
-                    "FRAME %llu: UI update END",
-                    static_cast<unsigned long long>(
-                        m_diagnosticFrameNumber));
-            }
-        }
-        else if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: m_engineView is NULL",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
         }
 
+        /*
+         * Selected/downloaded engines are loaded only after the current
+         * UI update has completed.
+         */
         if (
             !m_pendingScriptPath.empty())
         {
@@ -692,24 +364,14 @@ public:
 
             m_pendingScriptPath.clear();
 
-            diagnosticLog(
-                "Deferred script load BEGIN: %s",
-                selectedScript.c_str());
-
             if (
                 loadScript(
                     selectedScript))
             {
                 m_currentScriptPath =
                     selectedScript;
-
-                diagnosticLog(
-                    "Deferred script load SUCCESS.");
             }
             else {
-                diagnosticLog(
-                    "Deferred script load FAILED.");
-
                 std::fprintf(
                     stderr,
                     "Engine script failed to load:\n%s\n",
@@ -718,55 +380,16 @@ public:
         }
 
         /*
-         * This is the most important diagnostic boundary.
-         *
-         * If the log reaches RENDER BEGIN but never RENDER END, we know
-         * rendering itself got stuck.
-         *
-         * If it repeatedly reaches RENDER END while the physical screen
-         * remains black, rendering is returning normally and we move
-         * downstream toward the GPU present/drawable path.
+         * Render once for every iOS display-link callback.
          */
-        if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: RENDER BEGIN",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
-        }
-
         renderScene();
-
-        if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: RENDER END",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
-        }
 
         m_lastRenderTick =
             now;
 
-        if (verboseFrame) {
-            diagnosticLog(
-                "FRAME %llu: tickProMotion EXIT",
-                static_cast<unsigned long long>(
-                    m_diagnosticFrameNumber));
-        }
-
         return true;
     }
-
-private:
-
-    std::uint64_t m_diagnosticFrameNumber =
-        0;
 };
-
-/*
- * ============================================================
- * Application state
- * ============================================================
- */
 
 struct EngineSimIOSState
 {
@@ -781,6 +404,10 @@ struct EngineSimIOSState
     bool rendererInitialized =
         false;
 
+    /*
+     * These can be changed by SDL's immediate lifecycle-event dispatch,
+     * so keep them atomic.
+     */
     std::atomic<bool> suspended{
         false
     };
@@ -792,81 +419,11 @@ struct EngineSimIOSState
     std::atomic<bool> resumePending{
         false
     };
-
-    std::uint64_t iterateCount =
-        0;
 };
 
 static void printPathStatus(
     const RuntimePaths &paths)
 {
-    const bool mainFound =
-        std::filesystem::exists(
-            paths.assetDirectory
-            / "main.mr");
-
-    const bool fontFound =
-        std::filesystem::exists(
-            paths.assetDirectory
-            / "fonts/slkscr.ttf");
-
-    const bool meshFound =
-        std::filesystem::exists(
-            paths.assetDirectory
-            / "authored_meshes.obj");
-
-    const bool vertexFound =
-        std::filesystem::exists(
-            paths.assetDirectory
-            / "shaders/engine_sim.vertex.msl");
-
-    const bool fragmentFound =
-        std::filesystem::exists(
-            paths.assetDirectory
-            / "shaders/engine_sim.fragment.msl");
-
-    diagnosticLog(
-        "Application directory: %s",
-        paths.applicationDirectory
-            .string()
-            .c_str());
-
-    diagnosticLog(
-        "Asset directory: %s",
-        paths.assetDirectory
-            .string()
-            .c_str());
-
-    diagnosticLog(
-        "Asset main.mr: %s",
-        mainFound
-            ? "FOUND"
-            : "MISSING");
-
-    diagnosticLog(
-        "Asset font: %s",
-        fontFound
-            ? "FOUND"
-            : "MISSING");
-
-    diagnosticLog(
-        "Asset mesh library: %s",
-        meshFound
-            ? "FOUND"
-            : "MISSING");
-
-    diagnosticLog(
-        "Metal vertex shader: %s",
-        vertexFound
-            ? "FOUND"
-            : "MISSING");
-
-    diagnosticLog(
-        "Metal fragment shader: %s",
-        fragmentFound
-            ? "FOUND"
-            : "MISSING");
-
     std::printf(
         "========================================\n");
 
@@ -890,43 +447,47 @@ static void printPathStatus(
 
     std::printf(
         "\nmain.mr: %s\n",
-        mainFound
+        std::filesystem::exists(
+            paths.assetDirectory
+            / "main.mr")
             ? "FOUND"
             : "MISSING");
 
     std::printf(
         "font: %s\n",
-        fontFound
+        std::filesystem::exists(
+            paths.assetDirectory
+            / "fonts/slkscr.ttf")
             ? "FOUND"
             : "MISSING");
 
     std::printf(
         "mesh library: %s\n",
-        meshFound
+        std::filesystem::exists(
+            paths.assetDirectory
+            / "authored_meshes.obj")
             ? "FOUND"
             : "MISSING");
 
     std::printf(
         "Metal vertex shader: %s\n",
-        vertexFound
+        std::filesystem::exists(
+            paths.assetDirectory
+            / "shaders/engine_sim.vertex.msl")
             ? "FOUND"
             : "MISSING");
 
     std::printf(
         "Metal fragment shader: %s\n",
-        fragmentFound
+        std::filesystem::exists(
+            paths.assetDirectory
+            / "shaders/engine_sim.fragment.msl")
             ? "FOUND"
             : "MISSING");
 
     std::printf(
         "========================================\n");
 }
-
-/*
- * ============================================================
- * SDL application callbacks
- * ============================================================
- */
 
 SDL_AppResult SDL_AppInit(
     void **appstate,
@@ -936,40 +497,18 @@ SDL_AppResult SDL_AppInit(
     (void)argc;
     (void)argv;
 
-    /*
-     * Open this before doing basically anything else.
-     */
-    openDiagnosticLog();
-
-    diagnosticLog(
-        "SDL_AppInit ENTER");
-
-    diagnosticLog(
-        "SDL version compiled: %d.%d.%d",
-        SDL_MAJOR_VERSION,
-        SDL_MINOR_VERSION,
-        SDL_MICRO_VERSION);
-
     std::printf(
         "\n\n"
         "========================================\n"
         " ENGINE SIMULATOR iOS\n"
-        " Diagnostic ProMotion host starting\n"
+        " ProMotion application host starting\n"
         "========================================\n");
 
     auto *state =
         new EngineSimIOSState();
 
-    diagnosticLog(
-        "EngineSimIOSState allocated: %p",
-        static_cast<void *>(
-            state));
-
     *appstate =
         state;
-
-    diagnosticLog(
-        "platform.initialize BEGIN");
 
     if (
         !state->platform.initialize(
@@ -977,12 +516,6 @@ SDL_AppResult SDL_AppInit(
             1920,
             1080))
     {
-        diagnosticLog(
-            "platform.initialize FAILED: %s",
-            state->platform
-                .lastError()
-                .c_str());
-
         std::fprintf(
             stderr,
             "iOS SDL platform initialization failed:\n%s\n",
@@ -993,37 +526,16 @@ SDL_AppResult SDL_AppInit(
         return SDL_APP_FAILURE;
     }
 
-    diagnosticLog(
-        "platform.initialize SUCCESS");
-
-    diagnosticLog(
-        "Window dimensions immediately after init: %dx%d",
-        state->platform
-            .windowWidth(),
-        state->platform
-            .windowHeight());
-
-    diagnosticLog(
-        "Native window handle: %p",
-        state->platform
-            .nativeWindowHandle());
-
+    /*
+     * Ensure Files has a destination ready immediately.
+     */
     {
         std::error_code error;
 
         fs::create_directories(
             customEngineDirectory(),
             error);
-
-        diagnosticLog(
-            "Custom Engines directory creation: %s",
-            error
-                ? error.message().c_str()
-                : "OK");
     }
-
-    diagnosticLog(
-        "RuntimePaths::discover BEGIN");
 
     const RuntimePaths paths =
         RuntimePaths::discover(
@@ -1031,24 +543,11 @@ SDL_AppResult SDL_AppInit(
                 .applicationDirectory(),
             {});
 
-    diagnosticLog(
-        "RuntimePaths::discover END");
-
-    printPathStatus(
-        paths);
+    printPathStatus(paths);
 
     const fs::path shaderDirectory =
         paths.assetDirectory
         / "shaders";
-
-    diagnosticLog(
-        "Renderer shader directory: %s",
-        shaderDirectory
-            .string()
-            .c_str());
-
-    diagnosticLog(
-        "renderer.initialize BEGIN");
 
     if (
         !state->renderer.initialize(
@@ -1056,11 +555,6 @@ SDL_AppResult SDL_AppInit(
                 .nativeWindowHandle(),
             shaderDirectory.string()))
     {
-        diagnosticLog(
-            "renderer.initialize FAILED: %s",
-            state->renderer
-                .lastError());
-
         std::fprintf(
             stderr,
             "EngineSim GPU renderer initialization failed:\n%s\n",
@@ -1073,14 +567,8 @@ SDL_AppResult SDL_AppInit(
     state->rendererInitialized =
         true;
 
-    diagnosticLog(
-        "renderer.initialize SUCCESS");
-
     std::printf(
         "EngineSim SDL GPU renderer initialized.\n");
-
-    diagnosticLog(
-        "application.initialize BEGIN");
 
     state->application.initialize(
         &state->platform,
@@ -1088,34 +576,14 @@ SDL_AppResult SDL_AppInit(
         &state->audioOutput,
         paths);
 
-    diagnosticLog(
-        "application.initialize END");
-
     state->applicationInitialized =
         true;
 
-    diagnosticLog(
-        "refreshEngineCatalog BEGIN");
-
     refreshEngineCatalog();
-
-    diagnosticLog(
-        "refreshEngineCatalog END");
-
-    diagnosticLog(
-        "Final startup window dimensions: %dx%d",
-        state->platform
-            .windowWidth(),
-        state->platform
-            .windowHeight());
-
-    diagnosticLog(
-        "SDL_AppInit returning SDL_APP_CONTINUE");
 
     std::printf(
         "========================================\n"
         " Real EngineSim application initialized\n"
-        " Diagnostic logging enabled\n"
         " ProMotion presentation enabled\n"
         " Custom engine importing enabled\n"
         " iOS lifecycle handling enabled\n"
@@ -1137,21 +605,25 @@ SDL_AppResult SDL_AppEvent(
         state == nullptr
         || event == nullptr)
     {
-        diagnosticLog(
-            "SDL_AppEvent received null state/event.");
-
         return SDL_APP_CONTINUE;
     }
 
     /*
-     * Log important lifecycle events.
+     * iOS lifecycle events.
+     *
+     * SDL's callback host dispatches these events immediately from its
+     * internal event watcher. Do not wait for the ordinary event queue.
+     *
+     * Most importantly, SDL_EVENT_TERMINATING must return SUCCESS
+     * immediately. If we continue rendering/simulating while iOS is trying
+     * to terminate us, FrontBoard gives the process five seconds and then
+     * kills it with 0x8BADF00D.
      */
     switch (event->type) {
-
         case SDL_EVENT_TERMINATING:
         {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_TERMINATING");
+            std::printf(
+                "iOS lifecycle: terminating.\n");
 
             state->terminating.store(
                 true,
@@ -1161,16 +633,13 @@ SDL_AppResult SDL_AppEvent(
                 true,
                 std::memory_order_release);
 
-            diagnosticLog(
-                "Returning SDL_APP_SUCCESS immediately for termination.");
-
             return SDL_APP_SUCCESS;
         }
 
         case SDL_EVENT_WILL_ENTER_BACKGROUND:
         {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_WILL_ENTER_BACKGROUND");
+            std::printf(
+                "iOS lifecycle: will enter background.\n");
 
             state->suspended.store(
                 true,
@@ -1181,8 +650,8 @@ SDL_AppResult SDL_AppEvent(
 
         case SDL_EVENT_DID_ENTER_BACKGROUND:
         {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_DID_ENTER_BACKGROUND");
+            std::printf(
+                "iOS lifecycle: entered background.\n");
 
             state->suspended.store(
                 true,
@@ -1193,17 +662,23 @@ SDL_AppResult SDL_AppEvent(
 
         case SDL_EVENT_WILL_ENTER_FOREGROUND:
         {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_WILL_ENTER_FOREGROUND");
+            std::printf(
+                "iOS lifecycle: will enter foreground.\n");
 
+            /*
+             * Stay suspended until DID_ENTER_FOREGROUND.
+             */
             break;
         }
 
         case SDL_EVENT_DID_ENTER_FOREGROUND:
         {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_DID_ENTER_FOREGROUND");
+            std::printf(
+                "iOS lifecycle: entered foreground.\n");
 
+            /*
+             * Reset timing on the next iterate before simulation resumes.
+             */
             state->resumePending.store(
                 true,
                 std::memory_order_release);
@@ -1217,28 +692,9 @@ SDL_AppResult SDL_AppEvent(
 
         case SDL_EVENT_LOW_MEMORY:
         {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_LOW_MEMORY");
-
             std::fprintf(
                 stderr,
                 "iOS lifecycle: low-memory warning.\n");
-
-            break;
-        }
-
-        case SDL_EVENT_QUIT:
-        {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_QUIT");
-
-            break;
-        }
-
-        case SDL_EVENT_DROP_FILE:
-        {
-            diagnosticLog(
-                "EVENT: SDL_EVENT_DROP_FILE");
 
             break;
         }
@@ -1247,18 +703,19 @@ SDL_AppResult SDL_AppEvent(
             break;
     }
 
+    /*
+     * SDL translates an iOS document-open/drop operation into a DROP_FILE
+     * event. That gives us a real filesystem path to the document handed
+     * over by Files, Safari, Discord, etc.
+     */
     if (
         event->type
-            == SDL_EVENT_DROP_FILE
+        == SDL_EVENT_DROP_FILE
         && event->drop.data
-            != nullptr)
+        != nullptr)
     {
         const fs::path source(
             event->drop.data);
-
-        diagnosticLog(
-            "Received DROP_FILE path: %s",
-            source.string().c_str());
 
         std::printf(
             "Received document from iOS:\n%s\n",
@@ -1269,18 +726,21 @@ SDL_AppResult SDL_AppEvent(
                 source);
 
         if (!imported.empty()) {
-            diagnosticLog(
-                "Refreshing engine catalog after import.");
-
+            /*
+             * Make it immediately visible in the picker.
+             */
             refreshEngineCatalog();
 
+            /*
+             * And load it immediately.
+             *
+             * This uses the same deferred engine-switch path as tapping
+             * a picker button, keeping UI destruction safe.
+             */
             if (
                 state
                     ->applicationInitialized)
             {
-                diagnosticLog(
-                    "Requesting imported engine script.");
-
                 state
                     ->application
                     .requestEngineScript(
@@ -1289,6 +749,10 @@ SDL_AppResult SDL_AppEvent(
         }
     }
 
+    /*
+     * Do not push ordinary events into EngineSim while the app is
+     * backgrounded or already terminating.
+     */
     if (
         !state->suspended.load(
             std::memory_order_acquire)
@@ -1301,14 +765,11 @@ SDL_AppResult SDL_AppEvent(
 
     if (
         event->type
-            == SDL_EVENT_QUIT)
+        == SDL_EVENT_QUIT)
     {
         state->terminating.store(
             true,
             std::memory_order_release);
-
-        diagnosticLog(
-            "SDL_EVENT_QUIT -> SDL_APP_SUCCESS");
 
         return SDL_APP_SUCCESS;
     }
@@ -1329,81 +790,48 @@ SDL_AppResult SDL_AppIterate(
         || !state
             ->applicationInitialized)
     {
-        diagnosticLog(
-            "SDL_AppIterate failure: state=%p initialized=%d",
-            static_cast<void *>(
-                state),
-            state != nullptr
-                ? static_cast<int>(
-                    state
-                        ->applicationInitialized)
-                : -1);
-
         return SDL_APP_FAILURE;
     }
 
-    ++state->iterateCount;
-
-    const bool verboseIteration =
-        state->iterateCount <= 20
-        || (
-            state->iterateCount
-            % 120
-            == 0);
-
-    if (verboseIteration) {
-        diagnosticLog(
-            "ITERATE %llu ENTER",
-            static_cast<unsigned long long>(
-                state->iterateCount));
-    }
-
+    /*
+     * If iOS has begun termination, do absolutely no additional physics,
+     * UI or rendering work.
+     */
     if (
         state->terminating.load(
             std::memory_order_acquire))
     {
-        diagnosticLog(
-            "ITERATE %llu: terminating -> SUCCESS",
-            static_cast<unsigned long long>(
-                state->iterateCount));
-
         return SDL_APP_SUCCESS;
     }
 
+    /*
+     * iOS normally stops the display link itself in the background, but
+     * don't depend on that.
+     *
+     * If SDL_AppIterate is invoked while inactive/backgrounded, return
+     * immediately. This prevents EngineSim's simulation and ProMotion
+     * renderer from consuming CPU/GPU while invisible.
+     */
     if (
         state->suspended.load(
             std::memory_order_acquire))
     {
-        if (verboseIteration) {
-            diagnosticLog(
-                "ITERATE %llu: suspended",
-                static_cast<unsigned long long>(
-                    state->iterateCount));
-        }
-
         return SDL_APP_CONTINUE;
     }
 
+    /*
+     * The app may have been suspended for seconds or minutes.
+     *
+     * Reset the frame clock once before resuming so the first foreground
+     * frame is not charged for the whole suspension interval.
+     */
     if (
         state->resumePending.exchange(
             false,
             std::memory_order_acq_rel))
     {
-        diagnosticLog(
-            "ITERATE %llu: resume pending, resetting frame clock.",
-            static_cast<unsigned long long>(
-                state->iterateCount));
-
-        state
-            ->application
+        state->application
             .resetFrameClock();
-    }
-
-    if (verboseIteration) {
-        diagnosticLog(
-            "ITERATE %llu: tickProMotion BEGIN",
-            static_cast<unsigned long long>(
-                state->iterateCount));
     }
 
     const bool continueRunning =
@@ -1411,31 +839,12 @@ SDL_AppResult SDL_AppIterate(
             ->application
             .tickProMotion();
 
-    if (verboseIteration) {
-        diagnosticLog(
-            "ITERATE %llu: tickProMotion END result=%d",
-            static_cast<unsigned long long>(
-                state->iterateCount),
-            static_cast<int>(
-                continueRunning));
-    }
-
     if (!continueRunning) {
-        diagnosticLog(
-            "tickProMotion requested termination.");
-
         state->terminating.store(
             true,
             std::memory_order_release);
 
         return SDL_APP_SUCCESS;
-    }
-
-    if (verboseIteration) {
-        diagnosticLog(
-            "ITERATE %llu EXIT",
-            static_cast<unsigned long long>(
-                state->iterateCount));
     }
 
     return SDL_APP_CONTINUE;
@@ -1445,10 +854,7 @@ void SDL_AppQuit(
     void *appstate,
     SDL_AppResult result)
 {
-    diagnosticLog(
-        "SDL_AppQuit ENTER result=%d",
-        static_cast<int>(
-            result));
+    (void)result;
 
     auto *state =
         static_cast<
@@ -1456,14 +862,13 @@ void SDL_AppQuit(
                 appstate);
 
     if (state == nullptr) {
-        diagnosticLog(
-            "SDL_AppQuit: state NULL.");
-
-        closeDiagnosticLog();
-
         return;
     }
 
+    /*
+     * Make absolutely sure no later callback tries to run another frame
+     * while teardown is happening.
+     */
     state->terminating.store(
         true,
         std::memory_order_release);
@@ -1472,25 +877,23 @@ void SDL_AppQuit(
         true,
         std::memory_order_release);
 
-    diagnosticLog(
-        "Shutdown flags set.");
-
     std::printf(
         "EngineSim iOS shutting down.\n");
 
+    /*
+     * Stop application-owned resources before destroying the renderer or
+     * SDL platform.
+     *
+     * EngineSimApplication::destroy() stops audio first, then releases the
+     * simulation and UI resources.
+     */
     if (
         state
             ->applicationInitialized)
     {
-        diagnosticLog(
-            "application.destroy BEGIN");
-
         state
             ->application
             .destroy();
-
-        diagnosticLog(
-            "application.destroy END");
 
         state
             ->applicationInitialized =
@@ -1501,38 +904,18 @@ void SDL_AppQuit(
         state
             ->rendererInitialized)
     {
-        diagnosticLog(
-            "renderer.shutdown BEGIN");
-
         state
             ->renderer
             .shutdown();
-
-        diagnosticLog(
-            "renderer.shutdown END");
 
         state
             ->rendererInitialized =
                 false;
     }
 
-    diagnosticLog(
-        "platform.shutdown BEGIN");
-
     state
         ->platform
         .shutdown();
 
-    diagnosticLog(
-        "platform.shutdown END");
-
-    diagnosticLog(
-        "Deleting EngineSimIOSState.");
-
     delete state;
-
-    diagnosticLog(
-        "SDL_AppQuit complete.");
-
-    closeDiagnosticLog();
 }
