@@ -11,6 +11,12 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
 
+    <key>NSCameraUsageDescription</key>
+    <string>Engine Simulator does not intentionally use the camera. This permission may be requested by a linked system or input library.</string>
+
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Engine Simulator may use Bluetooth to communicate with compatible external controllers and input devices.</string>
+
     <key>CFBundleDisplayName</key>
     <string>Engine Simulator: iOS</string>
 
