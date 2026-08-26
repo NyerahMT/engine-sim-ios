@@ -11,6 +11,9 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
 
+<key>ITSAppUsesNonExemptEncryption</key>
+<false/>
+
     <key>NSCameraUsageDescription</key>
     <string>Engine Simulator does not intentionally use the camera. This permission may be requested by a linked system or input library.</string>
 
