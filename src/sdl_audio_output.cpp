@@ -111,10 +111,14 @@ void SdlAudioOutput::fillStream() {
 
     constexpr int chunkFrames = 512;
 
-    // Keep a small, stable device lead. Larger queues hide underruns but make
-    // controls feel disconnected and turn a single discontinuity into a
-    // conspicuous delayed clack.
-    constexpr int targetFrames = 1024;
+    // Keep roughly 46 ms of PCM queued at 44.1 kHz.
+    //
+    // 2048 / 44100 ~= 0.0464 seconds.
+    //
+    // This gives iOS substantially more underrun headroom than the previous
+    // 1024-frame (~23 ms) queue while still keeping control response feeling
+    // essentially immediate for Engine Simulator.
+    constexpr int targetFrames = 2048;
 
     constexpr int targetBytes =
         targetFrames
@@ -135,8 +139,8 @@ void SdlAudioOutput::fillStream() {
                     / static_cast<int>(sizeof(std::int16_t)));
 
         // readAudioOutput zero-fills a short read. Queuing the complete chunk
-        // preserves the fixed lead the DirectSound ring buffer provided at
-        // startup and during a transient synthesizer underrun.
+        // preserves a stable device lead at startup and during transient
+        // synthesizer underruns.
         const int pcmFrames =
             m_simulator->readAudioOutput(
                 frames,
