@@ -656,9 +656,84 @@ jobs:
           echo "Signing identity: $SIGNING_IDENTITY"
 
           echo "PROFILE_PATH=$PROFILE_PATH" >> "$GITHUB_ENV"
+          echo "PROFILE_PLIST=$PROFILE_PLIST" >> "$GITHUB_ENV"
           echo "ENTITLEMENTS_PATH=$ENTITLEMENTS_PATH" >> "$GITHUB_ENV"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: "[72%] Verify certificate/profile match"
+        run: |
+          set -euo pipefail
+
+          PROFILE_CERT_PATH="$RUNNER_TEMP/profile-distribution.cer"
+          SIGNING_CERT_PATH="$RUNNER_TEMP/signing-distribution.pem"
+
+          python3 - "$PROFILE_PLIST" "$PROFILE_CERT_PATH" <<'PY'
+          import plistlib
+          import sys
+
+          profile_path = sys.argv[1]
+          output_path = sys.argv[2]
+
+          with open(profile_path, "rb") as handle:
+              profile = plistlib.load(handle)
+
+          certificates = profile.get("DeveloperCertificates", [])
+
+          if len(certificates) != 1:
+              raise SystemExit(
+                  f"ERROR: Expected exactly one certificate in provisioning profile; "
+                  f"found {len(certificates)}."
+              )
+
+          with open(output_path, "wb") as handle:
+              handle.write(certificates[0])
+          PY
+
+          security find-certificate \
+            -c "$SIGNING_IDENTITY" \
+            -p \
+            "$KEYCHAIN_PATH" \
+            > "$SIGNING_CERT_PATH"
+
+          PROFILE_CERT_SHA256="$(
+            openssl x509 \
+              -inform DER \
+              -in "$PROFILE_CERT_PATH" \
+              -noout \
+              -fingerprint \
+              -sha256 \
+              | sed 's/^sha256 Fingerprint=//'
+          )"
+
+          SIGNING_CERT_SHA256="$(
+            openssl x509 \
+              -in "$SIGNING_CERT_PATH" \
+              -noout \
+              -fingerprint \
+              -sha256 \
+              | sed 's/^sha256 Fingerprint=//'
+          )"
+
+          echo "Provisioning profile certificate:"
+          echo "$PROFILE_CERT_SHA256"
+
+          echo
+          echo "P12 signing certificate:"
+          echo "$SIGNING_CERT_SHA256"
+
+          if [ "$PROFILE_CERT_SHA256" != "$SIGNING_CERT_SHA256" ]; then
+            echo
+            echo "❌ CERTIFICATE MISMATCH"
+            echo
+            echo "The P12 signing certificate does not match"
+            echo "the certificate embedded in the provisioning profile."
+            exit 1
+          fi
+
+          echo
+          echo "✅ CERTIFICATE MATCH CONFIRMED"
+          echo "The P12 and provisioning profile use the same certificate."
 
       - name: "[75%] Sign Engine Simulator"
         run: |
@@ -945,12 +1020,43 @@ jobs:
           echo
           echo "Uploading Engine Simulator to App Store Connect..."
 
-          xcrun altool \
-            --upload-app \
-            --type ios \
-            --file "$IPA_PATH" \
-            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
-            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+          set +e
+
+          UPLOAD_OUTPUT="$(
+            xcrun altool \
+              --upload-app \
+              --type ios \
+              --file "$IPA_PATH" \
+              --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+              --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+              2>&1
+          )"
+
+          UPLOAD_STATUS=$?
+
+          set -e
+
+          printf '%s\n' "$UPLOAD_OUTPUT"
+
+          if [ "$UPLOAD_STATUS" -ne 0 ]; then
+            echo
+            echo "❌ App Store Connect uploader returned exit code $UPLOAD_STATUS."
+            exit "$UPLOAD_STATUS"
+          fi
+
+          if printf '%s\n' "$UPLOAD_OUTPUT" \
+            | grep -Eqi \
+              'UPLOAD FAILED|Failed to upload package|Validation failed|STATE_ERROR|ERROR:'; then
+
+            echo
+            echo "❌ APP STORE CONNECT REJECTED THE BUILD"
+            echo
+            echo "altool returned exit code 0 but reported an upload/validation failure."
+            exit 1
+          fi
+
+          echo
+          echo "✅ Apple uploader completed without reporting a validation failure."
 
       - name: "[99%] Remove temporary App Store key"
         if: always()
