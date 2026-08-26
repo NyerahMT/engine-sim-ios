@@ -1,7 +1,7 @@
 # Engine Simulator: iOS
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ange-yaghi/engine-sim/master/resources/logo.png" alt="Engine Simulator" width="700">
+  <img src="https://raw.githubusercontent.com/ange-yaghi/engine-sim/master/docs/public/screenshots/screenshot_v01.png" alt="Engine Simulator" width="100%">
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 ---
 
-## Engine Simulator on iOS
+<p><strong><big>Engine Simulator on iOS</big></strong></p>
 
 **Engine Simulator: iOS** brings the open-source Engine Simulator experience to Apple devices while staying as faithful as possible to the original simulator.
 
@@ -26,7 +26,7 @@ This project is an **unofficial iOS port** and is not an official release by Ang
 
 ---
 
-## Thank You, Ange
+<p><strong><big>Thank You, Ange</big></strong></p>
 
 Engine Simulator: iOS exists because of the work of **Ange Yaghi (AngeTheGreat)**.
 
@@ -38,25 +38,25 @@ Thank you, Ange, for creating Engine Simulator and making projects like this pos
 
 <p align="center">
   <a href="https://github.com/ange-yaghi/engine-sim">
-    <img src="https://img.shields.io/badge/Original_Project-Engine_Simulator-black?style=for-the-badge&logo=github">
+    <img src="https://img.shields.io/badge/Original_Project-Engine_Simulator-black?style=for-the-badge&logo=github" alt="Original Engine Simulator">
   </a>
 </p>
 
 ---
 
-## The Simulator
+<p><strong><big>The Simulator</big></strong></p>
 
 Engine Simulator is a real-time internal combustion engine simulation built around physically modeled engine components.
 
 Rather than relying on prerecorded engine sounds, the simulator generates its audio from the behavior of the simulated engine itself.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ange-yaghi/engine-sim/master/resources/screenshot.png" alt="Engine Simulator">
+  <img src="https://raw.githubusercontent.com/ange-yaghi/engine-sim/master/docs/public/screenshots/screenshot_v01.png" alt="Engine Simulator" width="100%">
 </p>
 
 Engines are defined using Engine Simulator's scripting system, allowing everything from ordinary production engines to unusual and experimental configurations to be simulated.
 
-### From Engine Simulator
+<p><strong>From Engine Simulator</strong></p>
 
 - Real-time engine simulation
 - Procedurally synthesized engine audio
@@ -71,7 +71,7 @@ Engines are defined using Engine Simulator's scripting system, allowing everythi
 
 ---
 
-## Built for iOS
+<p><strong><big>Built for iOS</big></strong></p>
 
 This isn't a streamed desktop application, remote interface, or recreation.
 
@@ -96,7 +96,7 @@ The result is the original Engine Simulator running as an actual iOS application
 
 ---
 
-## Custom Engines
+<p><strong><big>Custom Engines</big></strong></p>
 
 Engine Simulator: iOS supports Engine Simulator's `.mr` engine scripts.
 
@@ -106,11 +106,11 @@ This allows engines created by the Engine Simulator community to be brought dire
 
 ---
 
-## Download
+<p><strong><big>Download</big></strong></p>
 
 <p align="center">
   <a href="#">
-    <img src="https://img.shields.io/badge/Download_on_the-App_Store-000000?style=for-the-badge&logo=apple&logoColor=white">
+    <img src="https://img.shields.io/badge/Download_on_the-App_Store-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download on the App Store">
   </a>
 </p>
 
@@ -120,7 +120,7 @@ This allows engines created by the Engine Simulator community to be brought dire
 
 ---
 
-## About the Original Project
+<p><strong><big>About the Original Project</big></strong></p>
 
 Engine Simulator was created by **Ange Yaghi (AngeTheGreat)**.
 
@@ -128,7 +128,7 @@ The original Engine Simulator project, its source code, documentation, and deskt
 
 <p align="center">
   <a href="https://github.com/ange-yaghi/engine-sim">
-    <img src="https://img.shields.io/badge/GitHub-Original_Engine_Simulator-181717?style=for-the-badge&logo=github">
+    <img src="https://img.shields.io/badge/GitHub-Original_Engine_Simulator-181717?style=for-the-badge&logo=github" alt="Original Engine Simulator">
   </a>
 </p>
 
@@ -136,7 +136,7 @@ If you're interested in how Engine Simulator works, creating engines, contributi
 
 ---
 
-## License & Attribution
+<p><strong><big>License & Attribution</big></strong></p>
 
 Engine Simulator: iOS is derived from the open-source **Engine Simulator** project created by Ange Yaghi.
 
@@ -148,7 +148,7 @@ See the repository's license for the applicable licensing terms.
 
 ---
 
-## AI-Assisted Development
+<p><strong><big>AI-Assisted Development</big></strong></p>
 
 AI tools were used during development primarily to improve efficiency while porting, debugging, reviewing, and adapting a large existing C++ codebase for iOS.
 
