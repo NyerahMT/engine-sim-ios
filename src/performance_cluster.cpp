@@ -40,12 +40,6 @@ void PerformanceCluster::initialize(
 
     /*
      * Real Time / delta Time
-     *
-     * 100% means physics processing consumes exactly as much
-     * wall-clock time as the simulated timestep budget.
-     *
-     * < 100 = faster than real time
-     * > 100 = unable to keep up
      */
     m_timePerTimestepGauge =
         addElement<LabeledGauge>();
@@ -296,7 +290,10 @@ void PerformanceCluster::initialize(
             3);
 
     /*
-     * Simulation speed
+     * Effective simulation speed.
+     *
+     * This is measured from actual physics work rather than reading
+     * Simulator::m_simulationSpeed, which normally remains 1.0.
      */
     m_simSpeedGauge =
         addElement<LabeledGauge>();
@@ -326,22 +323,22 @@ void PerformanceCluster::initialize(
     m_simSpeedGauge
         ->m_gauge
         ->m_max =
-            1000;
+            10;
 
     m_simSpeedGauge
         ->m_gauge
         ->m_minorStep =
-            50;
+            0.5f;
 
     m_simSpeedGauge
         ->m_gauge
         ->m_majorStep =
-            100;
+            1.0f;
 
     m_simSpeedGauge
         ->m_gauge
         ->m_maxMinorTick =
-            1000;
+            20;
 
     m_simSpeedGauge
         ->m_gauge
@@ -665,7 +662,7 @@ void PerformanceCluster::update(float dt) {
         m_simulator
             ->getSimulationFrequency();
 
-    const double simulationSpeed =
+    const double configuredSimulationSpeed =
         m_simulator
             ->getSimulationSpeed();
 
@@ -674,17 +671,8 @@ void PerformanceCluster::update(float dt) {
             * m_filteredSimulationFrequency
         + 0.1
             * simulationFrequency
-            * simulationSpeed;
+            * configuredSimulationSpeed;
 
-    /*
-     * Simulator::getAverageProcessingTime() is the filtered
-     * frame physics time in MICROSECONDS.
-     *
-     * Divide it by the number of simulation steps completed in
-     * that frame to get actual wall-clock seconds per timestep.
-     *
-     * This was the missing feed that left RT/dT dead.
-     */
     const int steps =
         m_simulator
             ->getFrameIterationCount();
@@ -710,9 +698,6 @@ void PerformanceCluster::update(float dt) {
         }
     }
 
-    /*
-     * Feed the two audio health gauges directly too.
-     */
     const double inputLatency =
         m_simulator
             ->getSynthesizerInputLatency();
@@ -803,18 +788,77 @@ void PerformanceCluster::render() {
             2,
             0);
 
-    const double simulationSpeed =
+    /*
+     * Measure the effective simulation rate.
+     *
+     * Each completed physics step represents one simulator timestep.
+     * Comparing that simulated duration against the host frame duration
+     * tells us how quickly simulation time is actually advancing.
+     *
+     * 1 / SPEED:
+     *
+     *     1.0 = realtime
+     *     2.0 = simulation advancing at half realtime
+     *     0.5 = simulation advancing at twice realtime
+     */
+    double effectiveSimulationSpeed =
+        0.0;
+
+    const int completedSteps =
         m_simulator
-            ->getSimulationSpeed();
+            ->getFrameIterationCount();
+
+    const double timestep =
+        m_simulator
+            ->getTimestep();
+
+    /*
+     * UI update dt is clamped by the application to 1/30 on large
+     * scheduling hitches, but under ordinary operation it represents
+     * the host-frame cadence closely enough for this diagnostic gauge.
+     */
+    const double frameDt =
+        1.0
+        / std::max(
+            1.0f,
+            m_app
+                ->getAverageFramerate());
+
+    if (
+        completedSteps > 0
+        && timestep > 0.0
+        && frameDt > 0.0)
+    {
+        effectiveSimulationSpeed =
+            (
+                static_cast<double>(
+                    completedSteps)
+                * timestep)
+            / frameDt;
+    }
+
+    float reciprocalSpeed =
+        0.0f;
+
+    if (
+        std::isfinite(
+            effectiveSimulationSpeed)
+        && effectiveSimulationSpeed
+            > 0.000001)
+    {
+        reciprocalSpeed =
+            static_cast<float>(
+                1.0
+                / effectiveSimulationSpeed);
+    }
 
     m_simSpeedGauge
         ->m_gauge
         ->m_value =
-            simulationSpeed > 0.0
-                ? 1.0f
-                    / static_cast<float>(
-                        simulationSpeed)
-                : 0.0f;
+            std::clamp(
+                reciprocalSpeed,
+                0.0f,
+                10.0f);
 
     m_audioLagGauge->m_bounds =
         grid.get(
@@ -822,9 +866,6 @@ void PerformanceCluster::render() {
             0,
             1);
 
-    /*
-     * Display output-buffer latency in milliseconds.
-     */
     m_audioLagGauge
         ->m_gauge
         ->m_value =
