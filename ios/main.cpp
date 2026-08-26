@@ -12,6 +12,7 @@
 #include "../include/sdl_gpu_renderer.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -226,6 +227,34 @@ class EngineSimIOSApplication final
     : public EngineSimApplication
 {
 public:
+
+    /*
+     * Reset our wall-clock frame timer after returning from the
+     * background.
+     *
+     * Without this, the first foreground frame can inherit the entire
+     * suspension interval as its elapsed time. The normal dt clamp protects
+     * physics, but resetting the clock is cleaner and avoids artificial
+     * FPS/timing spikes.
+     */
+    void resetFrameClock()
+    {
+        if (m_platform == nullptr) {
+            m_lastTick = 0;
+            m_lastRenderTick = 0;
+            return;
+        }
+
+        const std::uint64_t now =
+            m_platform->ticks();
+
+        m_lastTick =
+            now;
+
+        m_lastRenderTick =
+            now;
+    }
+
     bool tickProMotion()
     {
         if (m_platform == nullptr) {
@@ -374,6 +403,22 @@ struct EngineSimIOSState
 
     bool rendererInitialized =
         false;
+
+    /*
+     * These can be changed by SDL's immediate lifecycle-event dispatch,
+     * so keep them atomic.
+     */
+    std::atomic<bool> suspended{
+        false
+    };
+
+    std::atomic<bool> terminating{
+        false
+    };
+
+    std::atomic<bool> resumePending{
+        false
+    };
 };
 
 static void printPathStatus(
@@ -541,6 +586,7 @@ SDL_AppResult SDL_AppInit(
         " Real EngineSim application initialized\n"
         " ProMotion presentation enabled\n"
         " Custom engine importing enabled\n"
+        " iOS lifecycle handling enabled\n"
         "========================================\n");
 
     return SDL_APP_CONTINUE;
@@ -560,6 +606,101 @@ SDL_AppResult SDL_AppEvent(
         || event == nullptr)
     {
         return SDL_APP_CONTINUE;
+    }
+
+    /*
+     * iOS lifecycle events.
+     *
+     * SDL's callback host dispatches these events immediately from its
+     * internal event watcher. Do not wait for the ordinary event queue.
+     *
+     * Most importantly, SDL_EVENT_TERMINATING must return SUCCESS
+     * immediately. If we continue rendering/simulating while iOS is trying
+     * to terminate us, FrontBoard gives the process five seconds and then
+     * kills it with 0x8BADF00D.
+     */
+    switch (event->type) {
+        case SDL_EVENT_TERMINATING:
+        {
+            std::printf(
+                "iOS lifecycle: terminating.\n");
+
+            state->terminating.store(
+                true,
+                std::memory_order_release);
+
+            state->suspended.store(
+                true,
+                std::memory_order_release);
+
+            return SDL_APP_SUCCESS;
+        }
+
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+        {
+            std::printf(
+                "iOS lifecycle: will enter background.\n");
+
+            state->suspended.store(
+                true,
+                std::memory_order_release);
+
+            break;
+        }
+
+        case SDL_EVENT_DID_ENTER_BACKGROUND:
+        {
+            std::printf(
+                "iOS lifecycle: entered background.\n");
+
+            state->suspended.store(
+                true,
+                std::memory_order_release);
+
+            break;
+        }
+
+        case SDL_EVENT_WILL_ENTER_FOREGROUND:
+        {
+            std::printf(
+                "iOS lifecycle: will enter foreground.\n");
+
+            /*
+             * Stay suspended until DID_ENTER_FOREGROUND.
+             */
+            break;
+        }
+
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+        {
+            std::printf(
+                "iOS lifecycle: entered foreground.\n");
+
+            /*
+             * Reset timing on the next iterate before simulation resumes.
+             */
+            state->resumePending.store(
+                true,
+                std::memory_order_release);
+
+            state->suspended.store(
+                false,
+                std::memory_order_release);
+
+            break;
+        }
+
+        case SDL_EVENT_LOW_MEMORY:
+        {
+            std::fprintf(
+                stderr,
+                "iOS lifecycle: low-memory warning.\n");
+
+            break;
+        }
+
+        default:
+            break;
     }
 
     /*
@@ -608,13 +749,28 @@ SDL_AppResult SDL_AppEvent(
         }
     }
 
-    state->platform.handleEvent(
-        *event);
+    /*
+     * Do not push ordinary events into EngineSim while the app is
+     * backgrounded or already terminating.
+     */
+    if (
+        !state->suspended.load(
+            std::memory_order_acquire)
+        && !state->terminating.load(
+            std::memory_order_acquire))
+    {
+        state->platform.handleEvent(
+            *event);
+    }
 
     if (
         event->type
         == SDL_EVENT_QUIT)
     {
+        state->terminating.store(
+            true,
+            std::memory_order_release);
+
         return SDL_APP_SUCCESS;
     }
 
@@ -637,12 +793,57 @@ SDL_AppResult SDL_AppIterate(
         return SDL_APP_FAILURE;
     }
 
+    /*
+     * If iOS has begun termination, do absolutely no additional physics,
+     * UI or rendering work.
+     */
+    if (
+        state->terminating.load(
+            std::memory_order_acquire))
+    {
+        return SDL_APP_SUCCESS;
+    }
+
+    /*
+     * iOS normally stops the display link itself in the background, but
+     * don't depend on that.
+     *
+     * If SDL_AppIterate is invoked while inactive/backgrounded, return
+     * immediately. This prevents EngineSim's simulation and ProMotion
+     * renderer from consuming CPU/GPU while invisible.
+     */
+    if (
+        state->suspended.load(
+            std::memory_order_acquire))
+    {
+        return SDL_APP_CONTINUE;
+    }
+
+    /*
+     * The app may have been suspended for seconds or minutes.
+     *
+     * Reset the frame clock once before resuming so the first foreground
+     * frame is not charged for the whole suspension interval.
+     */
+    if (
+        state->resumePending.exchange(
+            false,
+            std::memory_order_acq_rel))
+    {
+        state->application
+            .resetFrameClock();
+    }
+
     const bool continueRunning =
         state
             ->application
             .tickProMotion();
 
     if (!continueRunning) {
+        state->terminating.store(
+            true,
+            std::memory_order_release);
+
         return SDL_APP_SUCCESS;
     }
 
@@ -664,9 +865,28 @@ void SDL_AppQuit(
         return;
     }
 
+    /*
+     * Make absolutely sure no later callback tries to run another frame
+     * while teardown is happening.
+     */
+    state->terminating.store(
+        true,
+        std::memory_order_release);
+
+    state->suspended.store(
+        true,
+        std::memory_order_release);
+
     std::printf(
         "EngineSim iOS shutting down.\n");
 
+    /*
+     * Stop application-owned resources before destroying the renderer or
+     * SDL platform.
+     *
+     * EngineSimApplication::destroy() stops audio first, then releases the
+     * simulation and UI resources.
+     */
     if (
         state
             ->applicationInitialized)
