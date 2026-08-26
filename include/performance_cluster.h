@@ -22,6 +22,9 @@ class PerformanceCluster : public UiElement {
         virtual void update(float dt);
         virtual void render();
 
+        virtual void onMouseClick(
+            const Point &mouseLocal);
+
         void setSimulator(Simulator *simulator) { m_simulator = simulator; }
         void addTimePerTimestepSample(double sample);
         void addAudioLatencySample(double sample);
@@ -35,6 +38,15 @@ class PerformanceCluster : public UiElement {
         LabeledGauge *m_audioLagGauge;
 
     protected:
+        Bounds simulationSpeedCellBounds() const;
+
+        void changeSimulationTimeDivision(
+            int direction);
+
+        void drawTimeChevron(
+            const Bounds &bounds,
+            bool pointsRight);
+
         double m_timePerTimestep;
 
         double m_filteredSimulationFrequency;

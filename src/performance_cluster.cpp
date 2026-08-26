@@ -4,6 +4,7 @@
 #include "../include/gauge.h"
 #include "../include/constants.h"
 #include "../include/engine_sim_application.h"
+#include "../include/geometry_generator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,12 @@ PerformanceCluster::PerformanceCluster() {
     m_filteredSimulationFrequency = 0.0;
     m_inputBufferUsage = 0.0;
     m_audioLatency = 0.0;
+
+    /*
+     * This cluster now owns the left/right touch regions
+     * around the 1 / SPEED gauge.
+     */
+    m_checkMouse = true;
 }
 
 PerformanceCluster::~PerformanceCluster() {
@@ -40,6 +47,12 @@ void PerformanceCluster::initialize(
 
     /*
      * Real Time / delta Time
+     *
+     * 100% means physics processing consumes exactly as much
+     * wall-clock time as the simulated timestep budget.
+     *
+     * < 100 = faster than real time
+     * > 100 = unable to keep up
      */
     m_timePerTimestepGauge =
         addElement<LabeledGauge>();
@@ -74,12 +87,12 @@ void PerformanceCluster::initialize(
     m_timePerTimestepGauge
         ->m_gauge
         ->m_minorStep =
-            5.0f;
+            5;
 
     m_timePerTimestepGauge
         ->m_gauge
         ->m_majorStep =
-            10.0f;
+            10;
 
     m_timePerTimestepGauge
         ->m_gauge
@@ -191,10 +204,10 @@ void PerformanceCluster::initialize(
         120;
 
     m_fpsGauge->m_gauge->m_minorStep =
-        1.0f;
+        1;
 
     m_fpsGauge->m_gauge->m_majorStep =
-        15.0f;
+        15;
 
     m_fpsGauge
         ->m_gauge
@@ -290,7 +303,7 @@ void PerformanceCluster::initialize(
             3);
 
     /*
-     * Effective simulation speed.
+     * Simulation speed
      */
     m_simSpeedGauge =
         addElement<LabeledGauge>();
@@ -320,26 +333,22 @@ void PerformanceCluster::initialize(
     m_simSpeedGauge
         ->m_gauge
         ->m_max =
-            10;
+            1000;
 
-    /*
-     * This is intentionally fractional.
-     * Gauge::m_minorStep is now float.
-     */
     m_simSpeedGauge
         ->m_gauge
         ->m_minorStep =
-            0.5f;
+            50;
 
     m_simSpeedGauge
         ->m_gauge
         ->m_majorStep =
-            1.0f;
+            100;
 
     m_simSpeedGauge
         ->m_gauge
         ->m_maxMinorTick =
-            20;
+            1000;
 
     m_simSpeedGauge
         ->m_gauge
@@ -380,10 +389,7 @@ void PerformanceCluster::initialize(
         ->setBandCount(0);
 
     /*
-     * Audio latency.
-     *
-     * The measured value is stored in seconds and converted
-     * to milliseconds during render().
+     * Audio latency
      */
     m_audioLagGauge =
         addElement<LabeledGauge>();
@@ -418,12 +424,12 @@ void PerformanceCluster::initialize(
     m_audioLagGauge
         ->m_gauge
         ->m_minorStep =
-            5.0f;
+            5;
 
     m_audioLagGauge
         ->m_gauge
         ->m_majorStep =
-            10.0f;
+            10;
 
     m_audioLagGauge
         ->m_gauge
@@ -504,12 +510,12 @@ void PerformanceCluster::initialize(
     m_inputSamplesGauge
         ->m_gauge
         ->m_minorStep =
-            5.0f;
+            5;
 
     m_inputSamplesGauge
         ->m_gauge
         ->m_majorStep =
-            10.0f;
+            10;
 
     m_inputSamplesGauge
         ->m_gauge
@@ -586,12 +592,12 @@ void PerformanceCluster::initialize(
     m_simulationFrequencyGauge
         ->m_gauge
         ->m_minorStep =
-            1000.0f;
+            1000;
 
     m_simulationFrequencyGauge
         ->m_gauge
         ->m_majorStep =
-            10000.0f;
+            10000;
 
     m_simulationFrequencyGauge
         ->m_gauge
@@ -656,6 +662,8 @@ void PerformanceCluster::destroy() {
 }
 
 void PerformanceCluster::update(float dt) {
+    m_mouseBounds = m_bounds;
+
     UiElement::update(dt);
 
     if (m_simulator == nullptr) {
@@ -666,7 +674,7 @@ void PerformanceCluster::update(float dt) {
         m_simulator
             ->getSimulationFrequency();
 
-    const double configuredSimulationSpeed =
+    const double simulationSpeed =
         m_simulator
             ->getSimulationSpeed();
 
@@ -675,8 +683,17 @@ void PerformanceCluster::update(float dt) {
             * m_filteredSimulationFrequency
         + 0.1
             * simulationFrequency
-            * configuredSimulationSpeed;
+            * simulationSpeed;
 
+    /*
+     * Simulator::getAverageProcessingTime() is the filtered
+     * frame physics time in MICROSECONDS.
+     *
+     * Divide it by the number of simulation steps completed in
+     * that frame to get actual wall-clock seconds per timestep.
+     *
+     * This was the missing feed that left RT/dT dead.
+     */
     const int steps =
         m_simulator
             ->getFrameIterationCount();
@@ -702,6 +719,9 @@ void PerformanceCluster::update(float dt) {
         }
     }
 
+    /*
+     * Feed the two audio health gauges directly too.
+     */
     const double inputLatency =
         m_simulator
             ->getSynthesizerInputLatency();
@@ -722,6 +742,216 @@ void PerformanceCluster::update(float dt) {
 
     addAudioLatencySample(
         outputLatency);
+}
+
+
+void PerformanceCluster::onMouseClick(
+    const Point &mouseLocal)
+{
+    UiElement::onMouseClick(
+        mouseLocal);
+
+    if (m_simulator == nullptr) {
+        return;
+    }
+
+    const Bounds cell =
+        simulationSpeedCellBounds();
+
+    const Bounds left =
+        cell.horizontalSplit(
+            0.0f,
+            0.18f);
+
+    const Bounds right =
+        cell.horizontalSplit(
+            0.82f,
+            1.0f);
+
+    if (left.overlaps(mouseLocal)) {
+        changeSimulationTimeDivision(-1);
+    }
+    else if (right.overlaps(mouseLocal)) {
+        changeSimulationTimeDivision(1);
+    }
+}
+
+Bounds PerformanceCluster::simulationSpeedCellBounds() const
+{
+    Grid grid;
+
+    grid.h_cells = 3;
+    grid.v_cells = 2;
+
+    return grid.get(
+        m_bounds,
+        2,
+        0);
+}
+
+void PerformanceCluster::changeSimulationTimeDivision(
+    int direction)
+{
+    if (m_simulator == nullptr) {
+        return;
+    }
+
+    const double simulationSpeed =
+        m_simulator
+            ->getSimulationSpeed();
+
+    /*
+     * The gauge displays 1 / SPEED.
+     *
+     * Engine Simulator's actual simulator setting is the
+     * reciprocal:
+     *
+     * display 1    -> speed 1.0
+     * display 10   -> speed 0.1
+     * display 100  -> speed 0.01
+     * display 1000 -> speed 0.001
+     *
+     * Keep realtime (1) as the lower stop so the user can
+     * always return to normal time.
+     */
+    double division =
+        simulationSpeed > 0.0
+            ? 1.0 / simulationSpeed
+            : 1.0;
+
+    double nextDivision =
+        division;
+
+    if (direction > 0) {
+        if (division < 5.0) {
+            nextDivision = 10.0;
+        }
+        else if (division < 50.0) {
+            nextDivision = 100.0;
+        }
+        else {
+            nextDivision = 1000.0;
+        }
+    }
+    else if (direction < 0) {
+        if (division > 500.0) {
+            nextDivision = 100.0;
+        }
+        else if (division > 50.0) {
+            nextDivision = 10.0;
+        }
+        else {
+            nextDivision = 1.0;
+        }
+    }
+
+    m_simulator
+        ->setSimulationSpeed(
+            1.0 / nextDivision);
+}
+
+void PerformanceCluster::drawTimeChevron(
+    const Bounds &bounds,
+    bool pointsRight)
+{
+    const Point center =
+        getRenderPoint(
+            bounds.getPosition(
+                Bounds::center));
+
+    const float size =
+        pixelsToUnits(
+            std::fmin(
+                bounds.width(),
+                bounds.height())
+            * 0.25f);
+
+    const float halfWidth =
+        size * 0.65f;
+
+    const float halfHeight =
+        size;
+
+    const float baseX =
+        center.x
+        + (
+            pointsRight
+                ? -halfWidth
+                : halfWidth
+          );
+
+    const float pointX =
+        center.x
+        + (
+            pointsRight
+                ? halfWidth
+                : -halfWidth
+          );
+
+    GeometryGenerator::Line2dParameters line;
+
+    line.lineWidth =
+        pixelsToUnits(
+            3.0f);
+
+    GeometryGenerator *generator =
+        m_app
+            ->getGeometryGenerator();
+
+    GeometryGenerator::GeometryIndices
+        chevron;
+
+    generator->startShape();
+
+    line.x0 =
+        baseX;
+
+    line.y0 =
+        center.y
+        - halfHeight;
+
+    line.x1 =
+        pointX;
+
+    line.y1 =
+        center.y;
+
+    generator->generateLine2d(
+        line);
+
+    line.x0 =
+        pointX;
+
+    line.y0 =
+        center.y;
+
+    line.x1 =
+        baseX;
+
+    line.y1 =
+        center.y
+        + halfHeight;
+
+    generator->generateLine2d(
+        line);
+
+    generator->endShape(
+        &chevron);
+
+    resetShader();
+
+    m_app
+        ->getShaders()
+        ->SetBaseColor(
+            m_app
+                ->getForegroundColor());
+
+    m_app->drawGenerated(
+        chevron,
+        0x11,
+        m_app
+            ->getShaders()
+            ->GetUiFlags());
 }
 
 void PerformanceCluster::render() {
@@ -786,74 +1016,65 @@ void PerformanceCluster::render() {
             m_app
                 ->getAverageFramerate();
 
-    m_simSpeedGauge->m_bounds =
+    const Bounds simulationSpeedCell =
         grid.get(
             m_bounds,
             2,
             0);
 
     /*
-     * Measure effective simulation rate.
-     *
-     * 1 / SPEED:
-     *
-     * 1.0 = realtime
-     * 2.0 = simulation running at half realtime
-     * 0.5 = simulation running at twice realtime
+     * Leave room on either side of the gauge for the same
+     * chevron interaction used by the gear selector, rotated
+     * ninety degrees.
      */
-    double effectiveSimulationSpeed =
-        0.0;
+    const Bounds simulationSpeedGaugeBounds =
+        simulationSpeedCell
+            .horizontalSplit(
+                0.18f,
+                0.82f);
 
-    const int completedSteps =
+    const Bounds simulationSpeedLeft =
+        simulationSpeedCell
+            .horizontalSplit(
+                0.0f,
+                0.18f);
+
+    const Bounds simulationSpeedRight =
+        simulationSpeedCell
+            .horizontalSplit(
+                0.82f,
+                1.0f);
+
+    m_simSpeedGauge->m_bounds =
+        simulationSpeedGaugeBounds;
+
+    const double simulationSpeed =
         m_simulator
-            ->getFrameIterationCount();
+            ->getSimulationSpeed();
 
-    const double timestep =
-        m_simulator
-            ->getTimestep();
-
-    const double frameDt =
-        1.0
-        / std::max(
-            1.0f,
-            m_app
-                ->getAverageFramerate());
-
-    if (
-        completedSteps > 0
-        && timestep > 0.0
-        && frameDt > 0.0)
-    {
-        effectiveSimulationSpeed =
-            (
-                static_cast<double>(
-                    completedSteps)
-                * timestep)
-            / frameDt;
-    }
-
-    float reciprocalSpeed =
-        0.0f;
-
-    if (
-        std::isfinite(
-            effectiveSimulationSpeed)
-        && effectiveSimulationSpeed
-            > 0.000001)
-    {
-        reciprocalSpeed =
-            static_cast<float>(
-                1.0
-                / effectiveSimulationSpeed);
-    }
-
+    /*
+     * Restore the original Engine Simulator meaning:
+     *
+     *      displayed value = 1 / configured simulation speed
+     *
+     * It is NOT a measured realtime-performance ratio.
+     */
     m_simSpeedGauge
         ->m_gauge
         ->m_value =
-            std::clamp(
-                reciprocalSpeed,
-                0.0f,
-                10.0f);
+            simulationSpeed > 0.0
+                ? 1.0f
+                    / static_cast<float>(
+                        simulationSpeed)
+                : 0.0f;
+
+    drawTimeChevron(
+        simulationSpeedLeft,
+        false);
+
+    drawTimeChevron(
+        simulationSpeedRight,
+        true);
 
     m_audioLagGauge->m_bounds =
         grid.get(
@@ -862,8 +1083,7 @@ void PerformanceCluster::render() {
             1);
 
     /*
-     * Simulator reports seconds.
-     * Display milliseconds.
+     * Display output-buffer latency in milliseconds.
      */
     m_audioLagGauge
         ->m_gauge
