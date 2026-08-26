@@ -1,1087 +1,194 @@
-name: EngineSim iOS
+name: Fix Slow Motion Audio
 
 on:
-  push:
-    branches:
-      - master
-      - main
   workflow_dispatch:
 
 permissions:
-  contents: read
-
-concurrency:
-  group: engine-sim-ios-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  BUILD_DIR: build/ios
-  FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
-  BUNDLE_ID: com.nyerahmt.enginesimulator
-  MARKETING_VERSION: 0.1.0
-
-  HOMEBREW_NO_AUTO_UPDATE: 1
-  HOMEBREW_NO_INSTALL_CLEANUP: 1
+  contents: write
 
 jobs:
-  build:
-    name: 🔨 Build iOS · 0→55%
-    runs-on: macos-15
+  fix:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: "[3%] Select Xcode 26+"
-        run: |
-          set -euo pipefail
-
-          XCODE_PATH=""
-
-          get_xcode_major() {
-            local app_path="$1"
-            local version_output
-            local first_line
-            local version
-            local major
-
-            version_output="$(
-              "$app_path/Contents/Developer/usr/bin/xcodebuild" -version 2>&1
-            )"
-
-            first_line="${version_output%%$'\n'*}"
-            version="${first_line#Xcode }"
-            major="${version%%.*}"
-
-            if [[ "$major" =~ ^[0-9]+$ ]]; then
-              printf '%s\n' "$major"
-            else
-              printf '0\n'
-            fi
-          }
-
-          if [ -d "/Applications/Xcode.app" ]; then
-            DEFAULT_MAJOR="$(get_xcode_major "/Applications/Xcode.app")"
-
-            echo "Default Xcode major version: $DEFAULT_MAJOR"
-
-            if [ "$DEFAULT_MAJOR" -ge 26 ]; then
-              XCODE_PATH="/Applications/Xcode.app"
-            fi
-          fi
-
-          if [ -z "$XCODE_PATH" ]; then
-            while IFS= read -r CANDIDATE; do
-              [ -d "$CANDIDATE" ] || continue
-
-              CANDIDATE_MAJOR="$(get_xcode_major "$CANDIDATE")"
-
-              echo "Found $(basename "$CANDIDATE") — major version $CANDIDATE_MAJOR"
-
-              if [ "$CANDIDATE_MAJOR" -ge 26 ]; then
-                XCODE_PATH="$CANDIDATE"
-              fi
-            done < <(
-              find /Applications \
-                -maxdepth 1 \
-                -type d \
-                -name 'Xcode*.app' \
-                -print \
-                | sort
-            )
-          fi
-
-          if [ -z "$XCODE_PATH" ]; then
-            echo
-            echo "ERROR: Xcode 26 or newer was not found on this runner."
-            echo
-            echo "Installed Xcode applications:"
-
-            find /Applications \
-              -maxdepth 1 \
-              -type d \
-              -name 'Xcode*.app' \
-              -print \
-              || true
-
-            exit 1
-          fi
-
-          echo
-          echo "Selecting:"
-          echo "$XCODE_PATH"
-
-          sudo xcode-select \
-            -s "$XCODE_PATH/Contents/Developer"
-
-          echo
-          echo "Selected developer directory:"
-          xcode-select -p
-
-          echo
-          echo "Xcode:"
-          XCODE_VERSION_OUTPUT="$(xcodebuild -version 2>&1)"
-          printf '%s\n' "$XCODE_VERSION_OUTPUT"
-
-          echo
-          echo "iPhoneOS SDK:"
-          SDK_VERSION="$(
-            xcrun \
-              --sdk iphoneos \
-              --show-sdk-version
-          )"
-
-          printf '%s\n' "$SDK_VERSION"
-
-          SDK_MAJOR="${SDK_VERSION%%.*}"
-
-          if ! [[ "$SDK_MAJOR" =~ ^[0-9]+$ ]]; then
-            echo
-            echo "ERROR: Could not determine iPhoneOS SDK major version."
-            exit 1
-          fi
-
-          if [ "$SDK_MAJOR" -lt 26 ]; then
-            echo
-            echo "ERROR: iPhoneOS SDK $SDK_VERSION is too old."
-            echo "App Store Connect requires iOS 26 SDK or newer."
-            exit 1
-          fi
-
-          echo
-          echo "✅ SDK validation passed: iOS $SDK_VERSION"
-
-      - name: "[5%] Checkout source"
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 1
 
-      - name: "[10%] Restore SDL3 cache"
-        uses: actions/cache@v4
-        with:
-          path: .cache/fetchcontent
-          key: enginesim-ios-fetchcontent-v3-${{ hashFiles('cmake/EngineSimSDL.cmake', '.gitmodules') }}
-          restore-keys: |
-            enginesim-ios-fetchcontent-v3-
-            enginesim-ios-fetchcontent-v2-
-            enginesim-ios-fetchcontent-
-
-      - name: "[15%] Restore incremental build cache"
-        uses: actions/cache@v4
-        with:
-          path: build/ios
-          key: >-
-            enginesim-ios-xcode26-appstore-v1-
-            ${{ hashFiles(
-              'CMakeLists.txt',
-              'ios/CMakeLists.txt',
-              'cmake/**/*.cmake',
-              '.gitmodules'
-            ) }}-
-            ${{ github.sha }}
-          restore-keys: |
-            enginesim-ios-xcode26-appstore-v1-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}-
-            enginesim-ios-xcode26-appstore-v1-
-
-      - name: "[20%] Prepare compiler tools"
+      - name: Fix time control UI and slow motion simulation
+        shell: bash
         run: |
           set -euo pipefail
 
-          if ! brew list bison >/dev/null 2>&1; then
-            brew install bison
-          fi
-
-          if ! brew list flex >/dev/null 2>&1; then
-            brew install flex
-          fi
-
-          echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
-          echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
-
-          BISON_VERSION="$(
-            /opt/homebrew/opt/bison/bin/bison --version 2>&1
-          )"
-
-          FLEX_VERSION="$(
-            /opt/homebrew/opt/flex/bin/flex --version 2>&1
-          )"
-
-          echo "Bison:"
-          printf '%s\n' "${BISON_VERSION%%$'\n'*}"
-
-          echo
-          echo "Flex:"
-          printf '%s\n' "$FLEX_VERSION"
-
-      - name: "[25%] Validate source tree"
-        run: |
-          set -euo pipefail
-
-          test -f dependencies/submodules/simple-2d-constraint-solver/CMakeLists.txt
-          test -f dependencies/submodules/csv-io/CMakeLists.txt
-          test -f dependencies/submodules/piranha/CMakeLists.txt
-
-          test -f assets/main.mr
-          test -f assets/fonts/slkscr.ttf
-          test -f assets/authored_meshes.obj
-          test -f assets/shaders/engine_sim.vertex.msl
-          test -f assets/shaders/engine_sim.fragment.msl
-          test -f ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-
-          echo "EngineSim source tree ready."
-
-      - name: "[35%] Configure iOS build"
-        run: |
-          set -euo pipefail
-
-          echo "Building with:"
-          xcodebuild -version
-
-          echo
-          echo "Using iPhoneOS SDK:"
-          xcrun \
-            --sdk iphoneos \
-            --show-sdk-version
-
-          mkdir -p "$BUILD_DIR"
-
-          cmake \
-            -S ios \
-            -B "$BUILD_DIR" \
-            -G Xcode \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_SYSROOT=iphoneos \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_DIR" \
-            -DENGINE_SIM_FETCH_SDL3=ON \
-            -DENGINE_SIM_BUILD_SCRIPTING=ON \
-            -DBUILD_SHARED_LIBS=OFF
-
-      - name: "[50%] Compile Engine Simulator"
-        run: |
-          set -euo pipefail
-
-          JOBS="$(sysctl -n hw.ncpu)"
-
-          echo "Building with $JOBS parallel jobs."
-
-          cmake \
-            --build "$BUILD_DIR" \
-            --config Release \
-            --target EngineSimIOS \
-            --parallel "$JOBS" \
-            -- \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
-
-      - name: "[52%] Locate compiled application"
-        run: |
-          set -euo pipefail
-
-          APP_PATH="$(
-            find "$BUILD_DIR" \
-              -type d \
-              -path '*Release-iphoneos*' \
-              -name 'EngineSim.app' \
-              -print \
-              | sed -n '1p'
-          )"
-
-          if [ -z "$APP_PATH" ]; then
-            APP_PATH="$(
-              find "$BUILD_DIR" \
-                -type d \
-                -name 'EngineSim.app' \
-                -print \
-                | sed -n '1p'
-            )"
-          fi
-
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: EngineSim.app was not generated."
-            exit 1
-          fi
-
-          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
-
-          echo "EngineSim.app:"
-          echo "$APP_PATH"
-
-      - name: "[53%] Verify ARM64 build"
-        run: |
-          set -euo pipefail
-
-          EXECUTABLE="$APP_PATH/EngineSim"
-
-          test -f "$EXECUTABLE"
-
-          echo "Executable:"
-          file "$EXECUTABLE"
-
-          ARCH="$(lipo -info "$EXECUTABLE")"
-          echo "$ARCH"
-
-          if ! echo "$ARCH" | grep -q arm64; then
-            echo "ERROR: EngineSim executable is not arm64."
-            exit 1
-          fi
-
-          test -f "$APP_PATH/assets/main.mr"
-          test -f "$APP_PATH/assets/fonts/slkscr.ttf"
-          test -f "$APP_PATH/assets/authored_meshes.obj"
-          test -f "$APP_PATH/assets/shaders/engine_sim.vertex.msl"
-          test -f "$APP_PATH/assets/shaders/engine_sim.fragment.msl"
-
-          echo
-          echo "Unsigned ARM64 EngineSim.app validated."
-
-      - name: "[54%] Package unsigned build handoff"
-        run: |
-          set -euo pipefail
-
-          rm -rf handoff
-          mkdir -p handoff
-
-          APP_PARENT="$(dirname "$APP_PATH")"
-          APP_NAME="$(basename "$APP_PATH")"
-
-          tar \
-            -C "$APP_PARENT" \
-            -czf handoff/EngineSim-unsigned.tar.gz \
-            "$APP_NAME"
-
-          echo "Created:"
-          ls -lh handoff/EngineSim-unsigned.tar.gz
-
-      - name: "[55%] Hand build to signing stage"
-        uses: actions/upload-artifact@v4
-        with:
-          name: enginesim-ios-unsigned
-          path: handoff/EngineSim-unsigned.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-
-      - name: Build stage summary
-        if: always()
-        run: |
-          {
-            echo "## 🔨 EngineSim iOS Build"
-            echo
-            echo "**Progress:** 55%"
-            echo
-            echo '```text'
-            echo '[███████████---------] 55%'
-            echo '```'
-            echo
-            echo "Xcode:"
-            echo '```text'
-            xcodebuild -version || true
-            echo '```'
-            echo
-            echo "iPhoneOS SDK:"
-            echo '```text'
-            xcrun --sdk iphoneos --show-sdk-version || true
-            echo '```'
-            echo
-            echo "Unsigned ARM64 iOS application compiled."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  sign:
-    name: 🔐 Sign & Package · 55→85%
-    runs-on: macos-15
-    needs:
-      - build
-
-    steps:
-      - name: "[57%] Select Xcode 26+"
-        run: |
-          set -euo pipefail
-
-          XCODE_PATH=""
-
-          get_xcode_major() {
-            local app_path="$1"
-            local version_output
-            local first_line
-            local version
-            local major
-
-            version_output="$(
-              "$app_path/Contents/Developer/usr/bin/xcodebuild" -version 2>&1
-            )"
-
-            first_line="${version_output%%$'\n'*}"
-            version="${first_line#Xcode }"
-            major="${version%%.*}"
-
-            if [[ "$major" =~ ^[0-9]+$ ]]; then
-              printf '%s\n' "$major"
-            else
-              printf '0\n'
-            fi
-          }
-
-          if [ -d "/Applications/Xcode.app" ]; then
-            DEFAULT_MAJOR="$(get_xcode_major "/Applications/Xcode.app")"
-
-            if [ "$DEFAULT_MAJOR" -ge 26 ]; then
-              XCODE_PATH="/Applications/Xcode.app"
-            fi
-          fi
-
-          if [ -z "$XCODE_PATH" ]; then
-            while IFS= read -r CANDIDATE; do
-              [ -d "$CANDIDATE" ] || continue
-
-              CANDIDATE_MAJOR="$(get_xcode_major "$CANDIDATE")"
-
-              if [ "$CANDIDATE_MAJOR" -ge 26 ]; then
-                XCODE_PATH="$CANDIDATE"
-              fi
-            done < <(
-              find /Applications \
-                -maxdepth 1 \
-                -type d \
-                -name 'Xcode*.app' \
-                -print \
-                | sort
-            )
-          fi
-
-          if [ -z "$XCODE_PATH" ]; then
-            echo "ERROR: Xcode 26 or newer was not found."
-            exit 1
-          fi
-
-          sudo xcode-select \
-            -s "$XCODE_PATH/Contents/Developer"
-
-          echo "Signing toolchain:"
-          xcodebuild -version
-
-      - name: "[58%] Download compiled application"
-        uses: actions/download-artifact@v4
-        with:
-          name: enginesim-ios-unsigned
-          path: handoff
-
-      - name: "[60%] Restore application bundle"
-        run: |
-          set -euo pipefail
-
-          mkdir -p "$RUNNER_TEMP/enginesim-unsigned"
-
-          tar \
-            -C "$RUNNER_TEMP/enginesim-unsigned" \
-            -xzf handoff/EngineSim-unsigned.tar.gz
-
-          APP_PATH="$(
-            find "$RUNNER_TEMP/enginesim-unsigned" \
-              -type d \
-              -name 'EngineSim.app' \
-              -print \
-              | sed -n '1p'
-          )"
-
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: EngineSim.app missing after artifact extraction."
-            exit 1
-          fi
-
-          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
-
-          echo "Restored:"
-          echo "$APP_PATH"
-
-      - name: "[65%] Apply App Store identity"
-        run: |
-          set -euo pipefail
-
-          INFO_PLIST="$APP_PATH/Info.plist"
-
-          test -f "$INFO_PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleIdentifier $BUNDLE_ID" \
-            "$INFO_PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleShortVersionString $MARKETING_VERSION" \
-            "$INFO_PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" \
-            "$INFO_PLIST"
-
-          echo "Bundle ID:"
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" \
-            "$INFO_PLIST"
-
-          echo
-          echo "Version:"
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleShortVersionString" \
-            "$INFO_PLIST"
-
-          echo
-          echo "Build:"
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleVersion" \
-            "$INFO_PLIST"
-
-      - name: "[70%] Install Apple signing identity"
-        env:
-          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
-        run: |
-          set -euo pipefail
-
-          CERTIFICATE_PATH="$RUNNER_TEMP/distribution.p12"
-          PROFILE_PATH="$RUNNER_TEMP/EngineSim.mobileprovision"
-          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
-          ENTITLEMENTS_PATH="$RUNNER_TEMP/entitlements.plist"
-
-          KEYCHAIN_PATH="$RUNNER_TEMP/engine-sim-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
-
-          printf '%s' "$BUILD_CERTIFICATE_BASE64" \
-            | base64 --decode \
-            > "$CERTIFICATE_PATH"
-
-          printf '%s' "$BUILD_PROVISION_PROFILE_BASE64" \
-            | base64 --decode \
-            > "$PROFILE_PATH"
-
-          security create-keychain \
-            -p "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN_PATH"
-
-          security set-keychain-settings \
-            -lut 21600 \
-            "$KEYCHAIN_PATH"
-
-          security unlock-keychain \
-            -p "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN_PATH"
-
-          security import \
-            "$CERTIFICATE_PATH" \
-            -P "$P12_PASSWORD" \
-            -A \
-            -t cert \
-            -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-
-          security set-key-partition-list \
-            -S apple-tool:,apple: \
-            -s \
-            -k "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN_PATH"
-
-          security list-keychains \
-            -d user \
-            -s "$KEYCHAIN_PATH"
-
-          security cms \
-            -D \
-            -i "$PROFILE_PATH" \
-            > "$PROFILE_PLIST"
-
-          PROFILE_UUID="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :UUID" \
-              "$PROFILE_PLIST"
-          )"
-
-          PROFILE_NAME="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :Name" \
-              "$PROFILE_PLIST"
-          )"
-
-          PROFILE_APP_ID="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :Entitlements:application-identifier" \
-              "$PROFILE_PLIST"
-          )"
-
-          EXPECTED_SUFFIX=".$BUNDLE_ID"
-
-          if [[ "$PROFILE_APP_ID" != *"$EXPECTED_SUFFIX" ]]; then
-            echo "ERROR: Provisioning profile application identifier:"
-            echo "$PROFILE_APP_ID"
-            echo
-            echo "Expected suffix:"
-            echo "$EXPECTED_SUFFIX"
-            exit 1
-          fi
-
-          mkdir -p \
-            "$HOME/Library/MobileDevice/Provisioning Profiles"
-
-          cp \
-            "$PROFILE_PATH" \
-            "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
-
-          plutil \
-            -extract Entitlements \
-            xml1 \
-            -o "$ENTITLEMENTS_PATH" \
-            "$PROFILE_PLIST"
-
-          IDENTITY_OUTPUT="$(
-            security find-identity \
-              -v \
-              -p codesigning \
-              "$KEYCHAIN_PATH" \
-              || true
-          )"
-
-          SIGNING_IDENTITY="$(
-            printf '%s\n' "$IDENTITY_OUTPUT" \
-              | awk -F '"' '/Apple Distribution/ {print $2; exit}'
-          )"
-
-          if [ -z "$SIGNING_IDENTITY" ]; then
-            echo "ERROR: Apple Distribution signing identity not found."
-            printf '%s\n' "$IDENTITY_OUTPUT"
-            exit 1
-          fi
-
-          echo "Provisioning profile: $PROFILE_NAME"
-          echo "Profile UUID: $PROFILE_UUID"
-          echo "Application identifier: $PROFILE_APP_ID"
-          echo "Signing identity: $SIGNING_IDENTITY"
-
-          echo "PROFILE_PATH=$PROFILE_PATH" >> "$GITHUB_ENV"
-          echo "PROFILE_PLIST=$PROFILE_PLIST" >> "$GITHUB_ENV"
-          echo "ENTITLEMENTS_PATH=$ENTITLEMENTS_PATH" >> "$GITHUB_ENV"
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
-
-      - name: "[72%] Verify certificate/profile match"
-        run: |
-          set -euo pipefail
-
-          PROFILE_CERT_PATH="$RUNNER_TEMP/profile-distribution.cer"
-          SIGNING_CERT_PATH="$RUNNER_TEMP/signing-distribution.pem"
-
-          python3 - "$PROFILE_PLIST" "$PROFILE_CERT_PATH" <<'PY'
-          import plistlib
-          import sys
-
-          profile_path = sys.argv[1]
-          output_path = sys.argv[2]
-
-          with open(profile_path, "rb") as handle:
-              profile = plistlib.load(handle)
-
-          certificates = profile.get("DeveloperCertificates", [])
-
-          if len(certificates) != 1:
-              raise SystemExit(
-                  f"ERROR: Expected exactly one certificate in provisioning profile; "
-                  f"found {len(certificates)}."
+          python3 <<'PY'
+          from pathlib import Path
+
+          # ============================================================
+          # 1. REMOVE THE INSET BOX AROUND 1 / SPEED
+          # ============================================================
+
+          p = Path("src/performance_cluster.cpp")
+          s = p.read_text()
+
+          old = """    const Bounds simulationSpeedGaugeBounds =
+                  simulationSpeedCell
+                      .horizontalSplit(
+                          0.18f,
+                          0.82f);
+
+              const Bounds simulationSpeedLeft =
+          """
+
+          new = """    /*
+               * Keep the gauge itself at its original full-cell size.
+               * The left/right chevrons are overlays, not separate
+               * framed sub-controls.
+               */
+              const Bounds simulationSpeedGaugeBounds =
+                  simulationSpeedCell;
+
+              const Bounds simulationSpeedLeft =
+          """
+
+          if old not in s:
+              raise RuntimeError(
+                  "Could not find simulation speed gauge bounds block"
               )
 
-          with open(output_path, "wb") as handle:
-              handle.write(certificates[0])
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # ============================================================
+          # 2. HIGH-FIDELITY SLOW MOTION
+          #
+          # OLD:
+          #   fewer physics samples per real second
+          #   synthesizer input rate falls to 1000 / 100 / 10 Hz
+          #
+          # NEW:
+          #   keep normal sampling cadence
+          #   shrink simulated dt instead
+          #
+          # This preserves audio/simulation resolution while slowing
+          # the actual passage of simulated time.
+          # ============================================================
+
+          p = Path("src/simulator.cpp")
+          s = p.read_text()
+
+          old = """    m_synthesizer.setInputSampleRate(m_simulationFrequency * m_simulationSpeed);
+
+              const double timestep = getTimestep();
+              m_steps = (int)std::round((dt * m_simulationSpeed) / timestep);
+          """
+
+          new = """    /*
+               * Keep the synthesizer sampling clock fixed.
+               *
+               * Simulation speed is implemented by scaling the amount
+               * of simulated time advanced by every physics sample,
+               * rather than by throwing samples away.
+               *
+               * This is especially important for slow motion:
+               *
+               *     1 / 10   -> still 10 kHz sampling
+               *     1 / 100  -> still 10 kHz sampling
+               *     1 / 1000 -> still 10 kHz sampling
+               *
+               * Only the simulated timestep changes.
+               */
+              m_synthesizer.setInputSampleRate(
+                  m_simulationFrequency);
+
+              const double timestep =
+                  getTimestep();
+
+              m_steps =
+                  static_cast<int>(
+                      std::round(
+                          dt
+                          / timestep));
+          """
+
+          if old not in s:
+              raise RuntimeError(
+                  "Could not find Simulator::startFrame speed block"
+              )
+
+          s = s.replace(old, new, 1)
+
+          old = """    const double timestep = getTimestep();
+              m_system->process(timestep, 1);
+
+              m_engine->update(timestep);
+              m_vehicle->update(timestep);
+              m_transmission->update(timestep);
+
+              updateFilteredEngineSpeed(timestep);
+          """
+
+          new = """    /*
+               * Advance less simulated time per sample when running
+               * in slow motion while retaining full sampling density.
+               */
+              const double timestep =
+                  getTimestep()
+                  * m_simulationSpeed;
+
+              m_system->process(
+                  timestep,
+                  1);
+
+              m_engine->update(
+                  timestep);
+
+              m_vehicle->update(
+                  timestep);
+
+              m_transmission->update(
+                  timestep);
+
+              updateFilteredEngineSpeed(
+                  timestep);
+          """
+
+          if old not in s:
+              raise RuntimeError(
+                  "Could not find Simulator::simulateStep timestep block"
+              )
+
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+
+          print("Slow-motion audio/simulation fix applied.")
           PY
 
-          security find-certificate \
-            -c "$SIGNING_IDENTITY" \
-            -p \
-            "$KEYCHAIN_PATH" \
-            > "$SIGNING_CERT_PATH"
-
-          PROFILE_CERT_SHA256="$(
-            openssl x509 \
-              -inform DER \
-              -in "$PROFILE_CERT_PATH" \
-              -noout \
-              -fingerprint \
-              -sha256 \
-              | sed 's/^sha256 Fingerprint=//'
-          )"
-
-          SIGNING_CERT_SHA256="$(
-            openssl x509 \
-              -in "$SIGNING_CERT_PATH" \
-              -noout \
-              -fingerprint \
-              -sha256 \
-              | sed 's/^sha256 Fingerprint=//'
-          )"
-
-          echo "Provisioning profile certificate:"
-          echo "$PROFILE_CERT_SHA256"
-
-          echo
-          echo "P12 signing certificate:"
-          echo "$SIGNING_CERT_SHA256"
-
-          if [ "$PROFILE_CERT_SHA256" != "$SIGNING_CERT_SHA256" ]; then
-            echo
-            echo "❌ CERTIFICATE MISMATCH"
-            echo
-            echo "The P12 signing certificate does not match"
-            echo "the certificate embedded in the provisioning profile."
-            exit 1
-          fi
-
-          echo
-          echo "✅ CERTIFICATE MATCH CONFIRMED"
-          echo "The P12 and provisioning profile use the same certificate."
-
-      - name: "[75%] Sign Engine Simulator"
+      - name: Verify patch
+        shell: bash
         run: |
           set -euo pipefail
 
-          cp \
-            "$PROFILE_PATH" \
-            "$APP_PATH/embedded.mobileprovision"
+          grep -q "m_synthesizer.setInputSampleRate(" src/simulator.cpp
+          grep -q "getTimestep()" src/simulator.cpp
+          grep -q "m_simulationSpeed" src/simulator.cpp
+          grep -q "simulationSpeedGaugeBounds" src/performance_cluster.cpp
 
-          if [ -d "$APP_PATH/Frameworks" ]; then
-            find "$APP_PATH/Frameworks" \
-              -type d \
-              -name '*.framework' \
-              -print0 \
-              | while IFS= read -r -d '' FRAMEWORK; do
+          echo "Verification passed."
 
-                  echo "Signing framework:"
-                  echo "$FRAMEWORK"
-
-                  codesign \
-                    --force \
-                    --sign "$SIGNING_IDENTITY" \
-                    --keychain "$KEYCHAIN_PATH" \
-                    "$FRAMEWORK"
-
-                done
-
-            find "$APP_PATH/Frameworks" \
-              -type f \
-              -name '*.dylib' \
-              -print0 \
-              | while IFS= read -r -d '' DYLIB; do
-
-                  echo "Signing dylib:"
-                  echo "$DYLIB"
-
-                  codesign \
-                    --force \
-                    --sign "$SIGNING_IDENTITY" \
-                    --keychain "$KEYCHAIN_PATH" \
-                    "$DYLIB"
-
-                done
-          fi
-
-          codesign \
-            --force \
-            --sign "$SIGNING_IDENTITY" \
-            --keychain "$KEYCHAIN_PATH" \
-            --entitlements "$ENTITLEMENTS_PATH" \
-            --generate-entitlement-der \
-            "$APP_PATH"
-
-      - name: "[78%] Verify signed application"
+      - name: Commit
+        shell: bash
         run: |
           set -euo pipefail
 
-          EXECUTABLE="$APP_PATH/EngineSim"
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
 
-          test -f "$EXECUTABLE"
-          test -f "$APP_PATH/embedded.mobileprovision"
+          git add \
+            src/simulator.cpp \
+            src/performance_cluster.cpp
 
-          ARCH="$(lipo -info "$EXECUTABLE")"
-          echo "$ARCH"
+          git commit \
+            -m "Improve slow motion simulation and audio fidelity"
 
-          if ! echo "$ARCH" | grep -q arm64; then
-            echo "ERROR: EngineSim executable is not arm64."
-            exit 1
-          fi
-
-          FINAL_BUNDLE_ID="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleIdentifier" \
-              "$APP_PATH/Info.plist"
-          )"
-
-          if [ "$FINAL_BUNDLE_ID" != "$BUNDLE_ID" ]; then
-            echo "ERROR: Final bundle ID is:"
-            echo "$FINAL_BUNDLE_ID"
-            exit 1
-          fi
-
-          codesign \
-            --verify \
-            --deep \
-            --strict \
-            --verbose=2 \
-            "$APP_PATH"
-
-          echo
-          echo "Signing details:"
-
-          SIGNING_DETAILS="$(
-            codesign \
-              -d \
-              --verbose=4 \
-              "$APP_PATH" \
-              2>&1 \
-              || true
-          )"
-
-          printf '%s\n' "$SIGNING_DETAILS" \
-            | grep -E 'Identifier=|TeamIdentifier=|Authority=' \
-            || true
-
-          echo
-          echo "Signed Engine Simulator validated."
-
-      - name: "[82%] Package App Store IPA"
-        run: |
-          set -euo pipefail
-
-          rm -rf artifacts
-          mkdir -p artifacts/Payload
-
-          cp -R \
-            "$APP_PATH" \
-            artifacts/Payload/
-
-          (
-            cd artifacts
-
-            zip \
-              -qry \
-              EngineSim-iOS-AppStore.ipa \
-              Payload
-          )
-
-          echo "Created:"
-          ls -lh artifacts/EngineSim-iOS-AppStore.ipa
-
-      - name: "[85%] Hand IPA to TestFlight stage"
-        uses: actions/upload-artifact@v4
-        with:
-          name: engine-sim-ios-appstore
-          path: artifacts/EngineSim-iOS-AppStore.ipa
-          if-no-files-found: error
-          compression-level: 0
-
-      - name: Signing stage summary
-        if: always()
-        run: |
-          {
-            echo "## 🔐 EngineSim Signing"
-            echo
-            echo "**Progress:** 85%"
-            echo
-            echo '```text'
-            echo '[█████████████████---] 85%'
-            echo '```'
-            echo
-            echo "App Store signed IPA packaged."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  testflight:
-    name: 🚀 TestFlight · 85→100%
-    runs-on: macos-15
-    needs:
-      - sign
-
-    steps:
-      - name: "[87%] Select Xcode 26+"
-        run: |
-          set -euo pipefail
-
-          XCODE_PATH=""
-
-          get_xcode_major() {
-            local app_path="$1"
-            local version_output
-            local first_line
-            local version
-            local major
-
-            version_output="$(
-              "$app_path/Contents/Developer/usr/bin/xcodebuild" -version 2>&1
-            )"
-
-            first_line="${version_output%%$'\n'*}"
-            version="${first_line#Xcode }"
-            major="${version%%.*}"
-
-            if [[ "$major" =~ ^[0-9]+$ ]]; then
-              printf '%s\n' "$major"
-            else
-              printf '0\n'
-            fi
-          }
-
-          if [ -d "/Applications/Xcode.app" ]; then
-            DEFAULT_MAJOR="$(get_xcode_major "/Applications/Xcode.app")"
-
-            if [ "$DEFAULT_MAJOR" -ge 26 ]; then
-              XCODE_PATH="/Applications/Xcode.app"
-            fi
-          fi
-
-          if [ -z "$XCODE_PATH" ]; then
-            while IFS= read -r CANDIDATE; do
-              [ -d "$CANDIDATE" ] || continue
-
-              CANDIDATE_MAJOR="$(get_xcode_major "$CANDIDATE")"
-
-              if [ "$CANDIDATE_MAJOR" -ge 26 ]; then
-                XCODE_PATH="$CANDIDATE"
-              fi
-            done < <(
-              find /Applications \
-                -maxdepth 1 \
-                -type d \
-                -name 'Xcode*.app' \
-                -print \
-                | sort
-            )
-          fi
-
-          if [ -z "$XCODE_PATH" ]; then
-            echo "ERROR: Xcode 26 or newer was not found."
-            exit 1
-          fi
-
-          sudo xcode-select \
-            -s "$XCODE_PATH/Contents/Developer"
-
-          echo "Upload toolchain:"
-          xcodebuild -version
-
-      - name: "[88%] Download signed IPA"
-        uses: actions/download-artifact@v4
-        with:
-          name: engine-sim-ios-appstore
-          path: artifacts
-
-      - name: "[90%] Verify TestFlight package"
-        run: |
-          set -euo pipefail
-
-          IPA_PATH="artifacts/EngineSim-iOS-AppStore.ipa"
-
-          test -f "$IPA_PATH"
-
-          echo "IPA ready for Apple:"
-          ls -lh "$IPA_PATH"
-
-      - name: "[93%] Configure App Store Connect authentication"
-        env:
-          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-
-          test -n "$APP_STORE_CONNECT_API_KEY"
-          test -n "$APP_STORE_CONNECT_KEY_ID"
-          test -n "$APP_STORE_CONNECT_ISSUER_ID"
-
-          PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
-
-          mkdir -p "$PRIVATE_KEYS_DIR"
-
-          API_KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-
-          printf '%s\n' "$APP_STORE_CONNECT_API_KEY" \
-            > "$API_KEY_PATH"
-
-          chmod 600 "$API_KEY_PATH"
-
-          echo "APP_STORE_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
-
-          echo "App Store Connect authentication prepared."
-
-      - name: "[97%] Upload build to TestFlight"
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-
-          IPA_PATH="artifacts/EngineSim-iOS-AppStore.ipa"
-
-          echo "Uploader:"
-          xcrun altool --version || true
-
-          echo
-          echo "Uploading Engine Simulator to App Store Connect..."
-
-          set +e
-
-          UPLOAD_OUTPUT="$(
-            xcrun altool \
-              --upload-app \
-              --type ios \
-              --file "$IPA_PATH" \
-              --apiKey "$APP_STORE_CONNECT_KEY_ID" \
-              --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
-              2>&1
-          )"
-
-          UPLOAD_STATUS=$?
-
-          set -e
-
-          printf '%s\n' "$UPLOAD_OUTPUT"
-
-          if [ "$UPLOAD_STATUS" -ne 0 ]; then
-            echo
-            echo "❌ App Store Connect uploader returned exit code $UPLOAD_STATUS."
-            exit "$UPLOAD_STATUS"
-          fi
-
-          if printf '%s\n' "$UPLOAD_OUTPUT" \
-            | grep -Eqi \
-              'UPLOAD FAILED|Failed to upload package|Validation failed|STATE_ERROR|ERROR:'; then
-
-            echo
-            echo "❌ APP STORE CONNECT REJECTED THE BUILD"
-            echo
-            echo "altool returned exit code 0 but reported an upload/validation failure."
-            exit 1
-          fi
-
-          echo
-          echo "✅ Apple uploader completed without reporting a validation failure."
-
-      - name: "[99%] Remove temporary App Store key"
-        if: always()
-        run: |
-          if [ -n "${APP_STORE_API_KEY_PATH:-}" ]; then
-            rm -f "$APP_STORE_API_KEY_PATH"
-          fi
-
-      - name: "[100%] TestFlight upload accepted"
-        run: |
-          echo "Engine Simulator upload accepted by App Store Connect."
-          echo "Apple may now take several minutes to process the build."
-
-          {
-            echo "## 🚀 EngineSim TestFlight"
-            echo
-            echo "**Progress:** 100%"
-            echo
-            echo '```text'
-            echo '[████████████████████] 100%'
-            echo '```'
-            echo
-            echo "### ✅ Upload accepted"
-            echo
-            echo "The build has been delivered to App Store Connect."
-            echo
-            echo "Apple may still show the build as Processing before it becomes available in TestFlight."
-          } >> "$GITHUB_STEP_SUMMARY"
+          git push
