@@ -24,10 +24,6 @@ PerformanceCluster::PerformanceCluster() {
     m_inputBufferUsage = 0.0;
     m_audioLatency = 0.0;
 
-    /*
-     * This cluster now owns the left/right touch regions
-     * around the 1 / SPEED gauge.
-     */
     m_checkMouse = true;
 }
 
@@ -45,15 +41,6 @@ void PerformanceCluster::initialize(
                 1.0,
                 units::deg));
 
-    /*
-     * Real Time / delta Time
-     *
-     * 100% means physics processing consumes exactly as much
-     * wall-clock time as the simulated timestep budget.
-     *
-     * < 100 = faster than real time
-     * > 100 = unable to keep up
-     */
     m_timePerTimestepGauge =
         addElement<LabeledGauge>();
 
@@ -179,9 +166,6 @@ void PerformanceCluster::initialize(
             },
             2);
 
-    /*
-     * FPS
-     */
     m_fpsGauge =
         addElement<LabeledGauge>();
 
@@ -302,9 +286,6 @@ void PerformanceCluster::initialize(
             },
             3);
 
-    /*
-     * Simulation speed
-     */
     m_simSpeedGauge =
         addElement<LabeledGauge>();
 
@@ -388,9 +369,6 @@ void PerformanceCluster::initialize(
         ->m_gauge
         ->setBandCount(0);
 
-    /*
-     * Audio latency
-     */
     m_audioLagGauge =
         addElement<LabeledGauge>();
 
@@ -474,9 +452,6 @@ void PerformanceCluster::initialize(
         ->m_gauge
         ->setBandCount(0);
 
-    /*
-     * Synth input buffer
-     */
     m_inputSamplesGauge =
         addElement<LabeledGauge>();
 
@@ -560,9 +535,6 @@ void PerformanceCluster::initialize(
         ->m_gauge
         ->setBandCount(0);
 
-    /*
-     * Simulation frequency
-     */
     m_simulationFrequencyGauge =
         addElement<LabeledGauge>();
 
@@ -685,15 +657,6 @@ void PerformanceCluster::update(float dt) {
             * simulationFrequency
             * simulationSpeed;
 
-    /*
-     * Simulator::getAverageProcessingTime() is the filtered
-     * frame physics time in MICROSECONDS.
-     *
-     * Divide it by the number of simulation steps completed in
-     * that frame to get actual wall-clock seconds per timestep.
-     *
-     * This was the missing feed that left RT/dT dead.
-     */
     const int steps =
         m_simulator
             ->getFrameIterationCount();
@@ -719,9 +682,6 @@ void PerformanceCluster::update(float dt) {
         }
     }
 
-    /*
-     * Feed the two audio health gauges directly too.
-     */
     const double inputLatency =
         m_simulator
             ->getSynthesizerInputLatency();
@@ -743,7 +703,6 @@ void PerformanceCluster::update(float dt) {
     addAudioLatencySample(
         outputLatency);
 }
-
 
 void PerformanceCluster::onMouseClick(
     const Point &mouseLocal)
@@ -800,20 +759,6 @@ void PerformanceCluster::changeSimulationTimeDivision(
         m_simulator
             ->getSimulationSpeed();
 
-    /*
-     * The gauge displays 1 / SPEED.
-     *
-     * Engine Simulator's actual simulator setting is the
-     * reciprocal:
-     *
-     * display 1    -> speed 1.0
-     * display 10   -> speed 0.1
-     * display 100  -> speed 0.01
-     * display 1000 -> speed 0.001
-     *
-     * Keep realtime (1) as the lower stop so the user can
-     * always return to normal time.
-     */
     double division =
         simulationSpeed > 0.0
             ? 1.0 / simulationSpeed
@@ -1022,16 +967,6 @@ void PerformanceCluster::render() {
             2,
             0);
 
-    /*
-     * Leave room on either side of the gauge for the same
-     * chevron interaction used by the gear selector, rotated
-     * ninety degrees.
-     */
-    /*
-     * Keep the gauge itself at its original full-cell size.
-     * The left/right chevrons are overlays, not separate
-     * framed sub-controls.
-     */
     const Bounds simulationSpeedGaugeBounds =
         simulationSpeedCell;
 
@@ -1054,13 +989,6 @@ void PerformanceCluster::render() {
         m_simulator
             ->getSimulationSpeed();
 
-    /*
-     * Restore the original Engine Simulator meaning:
-     *
-     *      displayed value = 1 / configured simulation speed
-     *
-     * It is NOT a measured realtime-performance ratio.
-     */
     m_simSpeedGauge
         ->m_gauge
         ->m_value =
@@ -1070,23 +998,12 @@ void PerformanceCluster::render() {
                         simulationSpeed)
                 : 0.0f;
 
-    drawTimeChevron(
-        simulationSpeedLeft,
-        false);
-
-    drawTimeChevron(
-        simulationSpeedRight,
-        true);
-
     m_audioLagGauge->m_bounds =
         grid.get(
             m_bounds,
             0,
             1);
 
-    /*
-     * Display output-buffer latency in milliseconds.
-     */
     m_audioLagGauge
         ->m_gauge
         ->m_value =
@@ -1121,6 +1038,14 @@ void PerformanceCluster::render() {
                     ->getSimulationFrequency());
 
     UiElement::render();
+
+    drawTimeChevron(
+        simulationSpeedLeft,
+        false);
+
+    drawTimeChevron(
+        simulationSpeedRight,
+        true);
 }
 
 void PerformanceCluster::addTimePerTimestepSample(
