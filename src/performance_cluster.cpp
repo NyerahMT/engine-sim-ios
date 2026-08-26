@@ -1027,11 +1027,13 @@ void PerformanceCluster::render() {
      * chevron interaction used by the gear selector, rotated
      * ninety degrees.
      */
+    /*
+     * Keep the gauge itself at its original full-cell size.
+     * The left/right chevrons are overlays, not separate
+     * framed sub-controls.
+     */
     const Bounds simulationSpeedGaugeBounds =
-        simulationSpeedCell
-            .horizontalSplit(
-                0.18f,
-                0.82f);
+        simulationSpeedCell;
 
     const Bounds simulationSpeedLeft =
         simulationSpeedCell

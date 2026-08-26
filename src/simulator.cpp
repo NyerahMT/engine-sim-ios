@@ -71,10 +71,32 @@ void Simulator::startFrame(double dt) {
 
     m_simulationStart = std::chrono::steady_clock::now();
     m_currentIteration = 0;
-    m_synthesizer.setInputSampleRate(m_simulationFrequency * m_simulationSpeed);
+    /*
+     * Keep the synthesizer sampling clock fixed.
+     *
+     * Simulation speed is implemented by scaling the amount
+     * of simulated time advanced by every physics sample,
+     * rather than by throwing samples away.
+     *
+     * This is especially important for slow motion:
+     *
+     *     1 / 10   -> still 10 kHz sampling
+     *     1 / 100  -> still 10 kHz sampling
+     *     1 / 1000 -> still 10 kHz sampling
+     *
+     * Only the simulated timestep changes.
+     */
+    m_synthesizer.setInputSampleRate(
+        m_simulationFrequency);
 
-    const double timestep = getTimestep();
-    m_steps = (int)std::round((dt * m_simulationSpeed) / timestep);
+    const double timestep =
+        getTimestep();
+
+    m_steps =
+        static_cast<int>(
+            std::round(
+                dt
+                / timestep));
 
     if (m_synthesizerLatencyCorrectionEnabled) {
         const double targetLatency = getSynthesizerInputLatencyTarget();
@@ -107,14 +129,29 @@ bool Simulator::simulateStep() {
         return false;
     }
 
-    const double timestep = getTimestep();
-    m_system->process(timestep, 1);
+    /*
+     * Advance less simulated time per sample when running
+     * in slow motion while retaining full sampling density.
+     */
+    const double timestep =
+        getTimestep()
+        * m_simulationSpeed;
 
-    m_engine->update(timestep);
-    m_vehicle->update(timestep);
-    m_transmission->update(timestep);
+    m_system->process(
+        timestep,
+        1);
 
-    updateFilteredEngineSpeed(timestep);
+    m_engine->update(
+        timestep);
+
+    m_vehicle->update(
+        timestep);
+
+    m_transmission->update(
+        timestep);
+
+    updateFilteredEngineSpeed(
+        timestep);
 
     Crankshaft *outputShaft = m_engine->getOutputCrankshaft();
     outputShaft->resetAngle();
