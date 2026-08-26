@@ -12,19 +12,19 @@
     <string>en</string>
 
     <key>CFBundleDisplayName</key>
-    <string>Engine Simulator</string>
+    <string>Engine Simulator: iOS</string>
 
     <key>CFBundleExecutable</key>
     <string>EngineSim</string>
 
     <key>CFBundleIdentifier</key>
-    <string>com.nyeraht.engine-sim-ios</string>
+    <string>com.nyerahmt.enginesimulator</string>
 
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
 
     <key>CFBundleName</key>
-    <string>Engine Simulator</string>
+    <string>Engine Simulator: iOS</string>
 
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -38,9 +38,6 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
 
-    <key>MinimumOSVersion</key>
-    <string>15.0</string>
-
     <!-- ProMotion / >60 Hz -->
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
@@ -50,7 +47,7 @@
 
         Files
           On My iPhone
-            Engine Simulator
+            Engine Simulator: iOS
               Custom Engines
     -->
     <key>UIFileSharingEnabled</key>
@@ -76,7 +73,7 @@
 
             <key>LSItemContentTypes</key>
             <array>
-                <string>com.nyeraht.engine-simulator.mr</string>
+                <string>com.nyerahmt.engine-simulator.mr</string>
             </array>
 
         </dict>
@@ -89,7 +86,7 @@
         <dict>
 
             <key>UTTypeIdentifier</key>
-            <string>com.nyeraht.engine-simulator.mr</string>
+            <string>com.nyerahmt.engine-simulator.mr</string>
 
             <key>UTTypeDescription</key>
             <string>Engine Simulator Script</string>
