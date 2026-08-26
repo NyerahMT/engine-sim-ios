@@ -74,12 +74,12 @@ void PerformanceCluster::initialize(
     m_timePerTimestepGauge
         ->m_gauge
         ->m_minorStep =
-            5;
+            5.0f;
 
     m_timePerTimestepGauge
         ->m_gauge
         ->m_majorStep =
-            10;
+            10.0f;
 
     m_timePerTimestepGauge
         ->m_gauge
@@ -191,10 +191,10 @@ void PerformanceCluster::initialize(
         120;
 
     m_fpsGauge->m_gauge->m_minorStep =
-        1;
+        1.0f;
 
     m_fpsGauge->m_gauge->m_majorStep =
-        15;
+        15.0f;
 
     m_fpsGauge
         ->m_gauge
@@ -291,9 +291,6 @@ void PerformanceCluster::initialize(
 
     /*
      * Effective simulation speed.
-     *
-     * This is measured from actual physics work rather than reading
-     * Simulator::m_simulationSpeed, which normally remains 1.0.
      */
     m_simSpeedGauge =
         addElement<LabeledGauge>();
@@ -325,6 +322,10 @@ void PerformanceCluster::initialize(
         ->m_max =
             10;
 
+    /*
+     * This is intentionally fractional.
+     * Gauge::m_minorStep is now float.
+     */
     m_simSpeedGauge
         ->m_gauge
         ->m_minorStep =
@@ -379,7 +380,10 @@ void PerformanceCluster::initialize(
         ->setBandCount(0);
 
     /*
-     * Audio latency
+     * Audio latency.
+     *
+     * The measured value is stored in seconds and converted
+     * to milliseconds during render().
      */
     m_audioLagGauge =
         addElement<LabeledGauge>();
@@ -388,11 +392,11 @@ void PerformanceCluster::initialize(
         "LATENCY";
 
     m_audioLagGauge->m_unit =
-        "%";
+        "ms";
 
     m_audioLagGauge
         ->m_spaceBeforeUnit =
-            false;
+            true;
 
     m_audioLagGauge->m_precision =
         1;
@@ -414,12 +418,12 @@ void PerformanceCluster::initialize(
     m_audioLagGauge
         ->m_gauge
         ->m_minorStep =
-            5;
+            5.0f;
 
     m_audioLagGauge
         ->m_gauge
         ->m_majorStep =
-            10;
+            10.0f;
 
     m_audioLagGauge
         ->m_gauge
@@ -500,12 +504,12 @@ void PerformanceCluster::initialize(
     m_inputSamplesGauge
         ->m_gauge
         ->m_minorStep =
-            5;
+            5.0f;
 
     m_inputSamplesGauge
         ->m_gauge
         ->m_majorStep =
-            10;
+            10.0f;
 
     m_inputSamplesGauge
         ->m_gauge
@@ -582,12 +586,12 @@ void PerformanceCluster::initialize(
     m_simulationFrequencyGauge
         ->m_gauge
         ->m_minorStep =
-            1000;
+            1000.0f;
 
     m_simulationFrequencyGauge
         ->m_gauge
         ->m_majorStep =
-            10000;
+            10000.0f;
 
     m_simulationFrequencyGauge
         ->m_gauge
@@ -789,17 +793,13 @@ void PerformanceCluster::render() {
             0);
 
     /*
-     * Measure the effective simulation rate.
-     *
-     * Each completed physics step represents one simulator timestep.
-     * Comparing that simulated duration against the host frame duration
-     * tells us how quickly simulation time is actually advancing.
+     * Measure effective simulation rate.
      *
      * 1 / SPEED:
      *
-     *     1.0 = realtime
-     *     2.0 = simulation advancing at half realtime
-     *     0.5 = simulation advancing at twice realtime
+     * 1.0 = realtime
+     * 2.0 = simulation running at half realtime
+     * 0.5 = simulation running at twice realtime
      */
     double effectiveSimulationSpeed =
         0.0;
@@ -812,11 +812,6 @@ void PerformanceCluster::render() {
         m_simulator
             ->getTimestep();
 
-    /*
-     * UI update dt is clamped by the application to 1/30 on large
-     * scheduling hitches, but under ordinary operation it represents
-     * the host-frame cadence closely enough for this diagnostic gauge.
-     */
     const double frameDt =
         1.0
         / std::max(
@@ -866,6 +861,10 @@ void PerformanceCluster::render() {
             0,
             1);
 
+    /*
+     * Simulator reports seconds.
+     * Display milliseconds.
+     */
     m_audioLagGauge
         ->m_gauge
         ->m_value =
