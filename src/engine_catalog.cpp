@@ -159,128 +159,242 @@ bool isMrFile(const fs::path &path) {
 }
 
 /*
- * Determine whether an .mr script is actually a runnable
- * Engine Simulator entry point.
+ * The picker wrapper calls main() after importing the selected file.
  *
- * Bundled selectable engines expose:
+ * That means a selectable community engine must actually export:
  *
  *     public node main
  *
- * Helper/module .mr files are valid scripts too, but they should
- * not appear in the engine picker as standalone engines.
+ * Helper files such as heads.mr, cams.mr, utilities.mr, etc. should remain
+ * available to the compiler but should NOT appear as separate engines.
  */
-bool scriptExportsMain(const fs::path &path) {
+bool exportsMainNode(
+    const fs::path &path)
+{
     std::ifstream file(
         path,
-        std::ios::in | std::ios::binary);
+        std::ios::in
+            | std::ios::binary);
 
     if (!file.is_open()) {
         return false;
     }
 
-    const std::string source(
-        (std::istreambuf_iterator<char>(file)),
-        std::istreambuf_iterator<char>());
+    /*
+     * Community scripts are text files. Limit the catalog scan so a corrupt
+     * or accidentally huge file cannot make opening the picker expensive.
+     */
+    constexpr std::size_t MaxScanBytes =
+        4 * 1024 * 1024;
 
-    const auto isIdentifier =
-        [](unsigned char c) {
-            return
-                std::isalnum(c)
-                || c == '_';
-        };
+    std::string source;
+    source.reserve(64 * 1024);
 
-    std::size_t position = 0;
+    char buffer[8192];
 
     while (
-        (position =
-            source.find(
-                "public",
-                position))
-        != std::string::npos)
+        file.good()
+        && source.size()
+            < MaxScanBytes)
     {
-        /*
-         * Don't accidentally match something like:
-         *
-         *     mypublic
-         */
-        if (
-            position > 0
-            && isIdentifier(
-                static_cast<unsigned char>(
-                    source[position - 1])))
+        file.read(
+            buffer,
+            sizeof(buffer));
+
+        const std::streamsize count =
+            file.gcount();
+
+        if (count <= 0) {
+            break;
+        }
+
+        const std::size_t remaining =
+            MaxScanBytes
+            - source.size();
+
+        source.append(
+            buffer,
+            static_cast<std::size_t>(
+                std::min<std::streamsize>(
+                    count,
+                    static_cast<std::streamsize>(
+                        remaining))));
+    }
+
+    /*
+     * Tiny token scanner instead of filename guesses.
+     *
+     * Ignore comments and quoted strings, then look for the three-token
+     * sequence:
+     *
+     *     public node main
+     */
+    std::vector<std::string> tokens;
+    tokens.reserve(256);
+
+    std::string token;
+
+    bool lineComment = false;
+    bool blockComment = false;
+    bool quotedString = false;
+    bool escapeNext = false;
+
+    auto finishToken =
+        [&]()
         {
-            position += 6;
+            if (!token.empty()) {
+                tokens.push_back(token);
+                token.clear();
+            }
+        };
+
+    for (
+        std::size_t i = 0;
+        i < source.size();
+        ++i)
+    {
+        const char c =
+            source[i];
+
+        const char next =
+            (i + 1 < source.size())
+                ? source[i + 1]
+                : '\0';
+
+        if (lineComment) {
+            if (c == '\n') {
+                lineComment = false;
+            }
+
             continue;
         }
 
-        std::size_t p =
-            position + 6;
+        if (blockComment) {
+            if (
+                c == '*'
+                && next == '/')
+            {
+                blockComment = false;
+                ++i;
+            }
 
-        while (
-            p < source.size()
-            && std::isspace(
-                static_cast<unsigned char>(
-                    source[p])))
-        {
-            ++p;
-        }
-
-        /*
-         * Require:
-         *
-         *     public node
-         */
-        if (
-            source.compare(
-                p,
-                4,
-                "node")
-                != 0
-            || (
-                p + 4 < source.size()
-                && isIdentifier(
-                    static_cast<unsigned char>(
-                        source[p + 4]))))
-        {
-            position += 6;
             continue;
         }
 
-        p += 4;
+        if (quotedString) {
+            if (escapeNext) {
+                escapeNext = false;
+                continue;
+            }
 
-        while (
-            p < source.size()
-            && std::isspace(
-                static_cast<unsigned char>(
-                    source[p])))
-        {
-            ++p;
+            if (c == '\\') {
+                escapeNext = true;
+                continue;
+            }
+
+            if (c == '"') {
+                quotedString = false;
+            }
+
+            continue;
         }
 
-        /*
-         * Require:
-         *
-         *     public node main
-         */
         if (
-            source.compare(
-                p,
-                4,
-                "main")
-                == 0
-            && (
-                p + 4 == source.size()
-                || !isIdentifier(
-                    static_cast<unsigned char>(
-                        source[p + 4]))))
+            c == '/'
+            && next == '/')
+        {
+            finishToken();
+            lineComment = true;
+            ++i;
+            continue;
+        }
+
+        if (
+            c == '/'
+            && next == '*')
+        {
+            finishToken();
+            blockComment = true;
+            ++i;
+            continue;
+        }
+
+        if (c == '"') {
+            finishToken();
+            quotedString = true;
+            continue;
+        }
+
+        if (
+            std::isalnum(
+                static_cast<unsigned char>(c))
+            || c == '_')
+        {
+            token.push_back(c);
+        }
+        else {
+            finishToken();
+        }
+    }
+
+    finishToken();
+
+    for (
+        std::size_t i = 0;
+        i + 2 < tokens.size();
+        ++i)
+    {
+        if (
+            tokens[i] == "public"
+            && tokens[i + 1]
+                == "node"
+            && tokens[i + 2]
+                == "main")
         {
             return true;
         }
-
-        position += 6;
     }
 
     return false;
+}
+
+std::string customEngineGroup(
+    const fs::path &root,
+    const fs::path &enginePath)
+{
+    std::error_code error;
+
+    const fs::path relative =
+        fs::relative(
+            enginePath,
+            root,
+            error);
+
+    if (
+        error
+        || relative.empty())
+    {
+        return "Community Engines";
+    }
+
+    const fs::path parent =
+        relative.parent_path();
+
+    if (parent.empty()) {
+        return "Community Engines";
+    }
+
+    const auto first =
+        parent.begin();
+
+    if (first == parent.end()) {
+        return "Community Engines";
+    }
+
+    return
+        "Community · "
+        + titleize(
+            first->string());
 }
 
 void appendCustomEngines(
@@ -342,18 +456,19 @@ void appendCustomEngines(
             file.is_regular_file(fileError)
             && !fileError
             && isMrFile(file.path())
-            && scriptExportsMain(file.path()))
+            && exportsMainNode(file.path()))
         {
             custom.push_back({
-                "Downloaded Engines",
+                customEngineGroup(
+                    root,
+                    file.path()),
                 engineNameFromPath(
                     file.path()),
-
                 /*
-                 * Keep the absolute path to the user's script.
+                 * Absolute paths are intentional.
                  *
-                 * loadScript() already has support for scripts
-                 * located outside the bundled asset directory.
+                 * std::filesystem path composition keeps an absolute RHS
+                 * absolute when loadScript builds the final source path.
                  */
                 file.path().string()
             });
@@ -369,6 +484,10 @@ void appendCustomEngines(
             const EngineCatalogEntry &a,
             const EngineCatalogEntry &b)
         {
+            if (a.group != b.group) {
+                return a.group < b.group;
+            }
+
             if (a.name != b.name) {
                 return a.name < b.name;
             }
