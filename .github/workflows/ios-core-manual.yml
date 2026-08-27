@@ -2,6 +2,18 @@ name: EngineSim iOS
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "App version sent to TestFlight (example: 0.4.1)"
+        required: false
+        default: "0.4.1"
+        type: string
+
+      build_number:
+        description: "TestFlight build number (example: 12)"
+        required: false
+        default: "12"
+        type: string
 
 permissions:
   contents: read
@@ -14,7 +26,11 @@ env:
   BUILD_DIR: build/ios
   FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
   BUNDLE_ID: com.nyerahmt.enginesimulator
-  MARKETING_VERSION: 0.1.0
+
+  # Manual runs use the values entered in the Actions UI.
+  # Calls from another workflow can omit them and safely fall back.
+  MARKETING_VERSION: ${{ inputs.version || '0.4.1' }}
+  BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
 
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
@@ -224,6 +240,39 @@ jobs:
 
           echo "EngineSim source tree ready."
 
+      - name: "[30%] Show requested TestFlight identity"
+        run: |
+          set -euo pipefail
+
+          echo "Requested TestFlight version:"
+          echo "$MARKETING_VERSION"
+
+          echo
+          echo "Requested TestFlight build:"
+          echo "$BUILD_NUMBER"
+
+          if ! [[ "$MARKETING_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo
+            echo "ERROR: Invalid version: $MARKETING_VERSION"
+            echo "Use something like 0.4.1 or 1.0."
+            exit 1
+          fi
+
+          if ! [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo
+            echo "ERROR: Build number must contain digits only."
+            exit 1
+          fi
+
+          if [ "$BUILD_NUMBER" -lt 1 ]; then
+            echo
+            echo "ERROR: Build number must be at least 1."
+            exit 1
+          fi
+
+          echo
+          echo "✅ TestFlight identity accepted: $MARKETING_VERSION ($BUILD_NUMBER)"
+
       - name: "[35%] Configure iOS build"
         run: |
           set -euo pipefail
@@ -365,6 +414,11 @@ jobs:
             echo
             echo "**Progress:** 55%"
             echo
+            echo
+            echo "**Version:** \`$MARKETING_VERSION\`"
+            echo
+            echo "**Build:** \`$BUILD_NUMBER\`"
+            echo
             echo '```text'
             echo '[███████████---------] 55%'
             echo '```'
@@ -497,6 +551,11 @@ jobs:
 
           test -f "$INFO_PLIST"
 
+          echo "Applying App Store identity:"
+          echo "Bundle ID: $BUNDLE_ID"
+          echo "Version:   $MARKETING_VERSION"
+          echo "Build:     $BUILD_NUMBER"
+
           /usr/libexec/PlistBuddy \
             -c "Set :CFBundleIdentifier $BUNDLE_ID" \
             "$INFO_PLIST"
@@ -506,9 +565,10 @@ jobs:
             "$INFO_PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" \
+            -c "Set :CFBundleVersion $BUILD_NUMBER" \
             "$INFO_PLIST"
 
+          echo
           echo "Bundle ID:"
           /usr/libexec/PlistBuddy \
             -c "Print :CFBundleIdentifier" \
@@ -525,6 +585,32 @@ jobs:
           /usr/libexec/PlistBuddy \
             -c "Print :CFBundleVersion" \
             "$INFO_PLIST"
+
+          FINAL_VERSION="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleShortVersionString" \
+              "$INFO_PLIST"
+          )"
+
+          FINAL_BUILD="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleVersion" \
+              "$INFO_PLIST"
+          )"
+
+          if [ "$FINAL_VERSION" != "$MARKETING_VERSION" ]; then
+            echo "ERROR: Version was not written correctly."
+            exit 1
+          fi
+
+          if [ "$FINAL_BUILD" != "$BUILD_NUMBER" ]; then
+            echo "ERROR: Build number was not written correctly."
+            exit 1
+          fi
+
+          echo
+          echo "✅ App Store identity confirmed:"
+          echo "$FINAL_VERSION ($FINAL_BUILD)"
 
       - name: "[70%] Install Apple signing identity"
         env:
@@ -806,9 +892,33 @@ jobs:
               "$APP_PATH/Info.plist"
           )"
 
+          FINAL_VERSION="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleShortVersionString" \
+              "$APP_PATH/Info.plist"
+          )"
+
+          FINAL_BUILD="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleVersion" \
+              "$APP_PATH/Info.plist"
+          )"
+
           if [ "$FINAL_BUNDLE_ID" != "$BUNDLE_ID" ]; then
             echo "ERROR: Final bundle ID is:"
             echo "$FINAL_BUNDLE_ID"
+            exit 1
+          fi
+
+          if [ "$FINAL_VERSION" != "$MARKETING_VERSION" ]; then
+            echo "ERROR: Final version is:"
+            echo "$FINAL_VERSION"
+            exit 1
+          fi
+
+          if [ "$FINAL_BUILD" != "$BUILD_NUMBER" ]; then
+            echo "ERROR: Final build number is:"
+            echo "$FINAL_BUILD"
             exit 1
           fi
 
@@ -834,6 +944,10 @@ jobs:
           printf '%s\n' "$SIGNING_DETAILS" \
             | grep -E 'Identifier=|TeamIdentifier=|Authority=' \
             || true
+
+          echo
+          echo "Final TestFlight identity:"
+          echo "$FINAL_VERSION ($FINAL_BUILD)"
 
           echo
           echo "Signed Engine Simulator validated."
@@ -876,6 +990,11 @@ jobs:
             echo "## 🔐 EngineSim Signing"
             echo
             echo "**Progress:** 85%"
+            echo
+            echo
+            echo "**Version:** \`$MARKETING_VERSION\`"
+            echo
+            echo "**Build:** \`$BUILD_NUMBER\`"
             echo
             echo '```text'
             echo '[█████████████████---] 85%'
@@ -974,6 +1093,46 @@ jobs:
           echo "IPA ready for Apple:"
           ls -lh "$IPA_PATH"
 
+          rm -rf "$RUNNER_TEMP/ipa-check"
+          mkdir -p "$RUNNER_TEMP/ipa-check"
+
+          unzip -q \
+            "$IPA_PATH" \
+            -d "$RUNNER_TEMP/ipa-check"
+
+          CHECK_PLIST="$RUNNER_TEMP/ipa-check/Payload/EngineSim.app/Info.plist"
+
+          test -f "$CHECK_PLIST"
+
+          IPA_VERSION="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleShortVersionString" \
+              "$CHECK_PLIST"
+          )"
+
+          IPA_BUILD="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleVersion" \
+              "$CHECK_PLIST"
+          )"
+
+          echo
+          echo "IPA TestFlight identity:"
+          echo "$IPA_VERSION ($IPA_BUILD)"
+
+          if [ "$IPA_VERSION" != "$MARKETING_VERSION" ]; then
+            echo "ERROR: IPA contains the wrong marketing version."
+            exit 1
+          fi
+
+          if [ "$IPA_BUILD" != "$BUILD_NUMBER" ]; then
+            echo "ERROR: IPA contains the wrong build number."
+            exit 1
+          fi
+
+          echo
+          echo "✅ IPA version/build verified before upload."
+
       - name: "[93%] Configure App Store Connect authentication"
         env:
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
@@ -1014,7 +1173,10 @@ jobs:
           xcrun altool --version || true
 
           echo
-          echo "Uploading Engine Simulator to App Store Connect..."
+          echo "Uploading Engine Simulator:"
+          echo "Version: $MARKETING_VERSION"
+          echo "Build:   $BUILD_NUMBER"
+          echo
 
           set +e
 
@@ -1064,12 +1226,17 @@ jobs:
       - name: "[100%] TestFlight upload accepted"
         run: |
           echo "Engine Simulator upload accepted by App Store Connect."
+          echo "Version: $MARKETING_VERSION"
+          echo "Build: $BUILD_NUMBER"
           echo "Apple may now take several minutes to process the build."
 
           {
             echo "## 🚀 EngineSim TestFlight"
             echo
             echo "**Progress:** 100%"
+            echo
+            echo
+            echo "**Uploaded:** \`$MARKETING_VERSION ($BUILD_NUMBER)\`"
             echo
             echo '```text'
             echo '[████████████████████] 100%'
