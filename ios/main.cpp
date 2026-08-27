@@ -192,6 +192,13 @@ fs::path importEngineFile(
 
     error.clear();
 
+    std::fprintf(
+        stderr,
+        "Custom engine import: copying\n  source: %s\n  destination: %s\n",
+        source.string().c_str(),
+        destination.string().c_str());
+    std::fflush(stderr);
+
     fs::copy_file(
         source,
         destination,
@@ -201,15 +208,67 @@ fs::path importEngineFile(
     if (error) {
         std::fprintf(
             stderr,
-            "Custom engine import failed: %s\n",
+            "Custom engine import failed during copy: %s\n",
             error.message().c_str());
+        std::fflush(stderr);
 
         return {};
     }
 
-    std::printf(
-        "Imported custom engine:\n%s\n",
-        destination.string().c_str());
+    /*
+     * Do not treat the iOS document handoff as successful until the
+     * permanent copy can be observed and contains data. The source URL/path
+     * may only be usable for the duration of the open-document handoff.
+     */
+    error.clear();
+
+    if (
+        !fs::exists(
+            destination,
+            error)
+        || error)
+    {
+        std::fprintf(
+            stderr,
+            "Custom engine import failed verification: destination missing: %s\n",
+            destination.string().c_str());
+        std::fflush(stderr);
+
+        return {};
+    }
+
+    error.clear();
+
+    const std::uintmax_t savedSize =
+        fs::file_size(
+            destination,
+            error);
+
+    if (
+        error
+        || savedSize == 0)
+    {
+        std::fprintf(
+            stderr,
+            "Custom engine import failed verification: invalid saved file: %s\n",
+            destination.string().c_str());
+        std::fflush(stderr);
+
+        std::error_code cleanupError;
+        fs::remove(
+            destination,
+            cleanupError);
+
+        return {};
+    }
+
+    std::fprintf(
+        stderr,
+        "Custom engine import SAVED permanently: %s (%ju bytes)\n",
+        destination.string().c_str(),
+        static_cast<std::uintmax_t>(
+            savedSize));
+    std::fflush(stderr);
 
     return destination;
 }
