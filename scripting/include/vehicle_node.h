@@ -2,18 +2,16 @@
 #define ATG_ENGINE_SIM_VEHICLE_NODE_H
 
 #include "object_reference_node.h"
-
 #include "engine_sim.h"
 
 namespace es_script {
 
     class VehicleNode : public ObjectReferenceNode<VehicleNode> {
     public:
-        VehicleNode() { /* void */ }
-        virtual ~VehicleNode() { /* void */ }
+        VehicleNode() { }
+        virtual ~VehicleNode() { }
 
-        void generate(Vehicle *vehicle) const
-        {
+        void generate(Vehicle *vehicle) const {
             vehicle->initialize(m_parameters);
         }
 
@@ -26,19 +24,31 @@ namespace es_script {
             addInput("tire_radius", &m_parameters.tireRadius);
             addInput("rolling_resistance", &m_parameters.rollingResistance);
 
+            addInput("max_brake_force", &m_compatMaxBrakeForce);
+            addInput("stiffness", &m_compatStiffness);
+            addInput("damping", &m_compatDamping);
+            addInput("max_flex", &m_compatMaxFlex);
+            addInput("limit_flex", &m_compatLimitFlex);
+            addInput("simulate_flex", &m_compatSimulateFlex);
+
             ObjectReferenceNode<VehicleNode>::registerInputs();
         }
 
-        virtual void _evaluate() {           
+        virtual void _evaluate() {
             setOutput(this);
-            // Read inputs
             readAllInputs();
-
         }
 
         Vehicle::Parameters m_parameters;
+
+        double m_compatMaxBrakeForce = 0.0;
+        double m_compatStiffness = 0.0;
+        double m_compatDamping = 0.0;
+        double m_compatMaxFlex = 0.0;
+        bool m_compatLimitFlex = false;
+        bool m_compatSimulateFlex = false;
     };
 
-} /* namespace es_script */
+}
 
-#endif /* ATG_ENGINE_SIM_VEHICLE_NODE_H */
+#endif
