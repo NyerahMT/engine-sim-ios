@@ -1,4 +1,5 @@
 #include "../include/engine_catalog.h"
+#include "../include/engine_script_inspector.h"
 
 #include <algorithm>
 #include <cctype>
@@ -456,7 +457,10 @@ void appendCustomEngines(
             file.is_regular_file(fileError)
             && !fileError
             && isMrFile(file.path())
-            && exportsMainNode(file.path()))
+            && (
+                exportsMainNode(file.path())
+                || !engine_script::findSingleEngineModuleNode(
+                    file.path()).empty()))
         {
             custom.push_back({
                 customEngineGroup(

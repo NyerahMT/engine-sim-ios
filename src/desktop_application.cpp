@@ -1,4 +1,5 @@
 #include "../include/engine_sim_application.h"
+#include "../include/engine_script_inspector.h"
 
 #include "../include/combustion_chamber_object.h"
 #include "../include/connecting_rod_object.h"
@@ -653,15 +654,91 @@ bool EngineSimApplication::loadScript(
     std::filesystem::path generatedEntryPoint;
 
     if (relativeScriptPath != "main.mr") {
+        const std::string engineModuleNode =
+            engine_script::findSingleEngineModuleNode(
+                scriptPath);
+
+        if (!engineModuleNode.empty()) {
+            /*
+             * Loader B: legacy engine-definition modules.
+             *
+             * M52B28.mr supplies an Engine but no Vehicle, Transmission, or
+             * runnable entry point. Old Engine Simulator supplied host-side
+             * fallback drivetrain values for this style of script.
+             *
+             * Reproduce those host defaults here instead of changing the
+             * engine module itself:
+             *
+             * Vehicle:
+             *   mass 1597 kg
+             *   diff 3.42
+             *   tire radius 10 in
+             *   Cd 0.25
+             *   frontal area 6 ft x 6 ft
+             *   rolling resistance 2000
+             *
+             * Transmission:
+             *   2.97 / 2.07 / 1.43 / 1.00 / 0.84 / 0.56
+             *   1000 ft-lb clutch
+             */
+            generatedEntryPoint =
+                std::filesystem::temp_directory_path()
+                / "engine-sim-module-entry.mr";
+
+            std::ofstream entryPoint(generatedEntryPoint);
+
+            /*
+             * Keep the selected script as the first import. Compiler.cpp uses
+             * that first imported path to expose sibling downloaded files as
+             * an additional Piranha search root.
+             */
+            entryPoint
+                << "import \""
+                << scriptPath.generic_string()
+                << "\"\n"
+                << "import \"engine_sim.mr\"\n\n"
+                << "units units()\n\n"
+                << "private node __ios_legacy_module_vehicle {\n"
+                << "    alias output __out:\n"
+                << "        vehicle(\n"
+                << "            mass: 1597 * units.kg,\n"
+                << "            drag_coefficient: 0.25,\n"
+                << "            cross_sectional_area: "
+                   "(6.0 * units.foot) * (6.0 * units.foot),\n"
+                << "            diff_ratio: 3.42,\n"
+                << "            tire_radius: 10 * units.inch,\n"
+                << "            rolling_resistance: 2000.0\n"
+                << "        );\n"
+                << "}\n\n"
+                << "private node __ios_legacy_module_transmission {\n"
+                << "    alias output __out:\n"
+                << "        transmission(\n"
+                << "            max_clutch_torque: "
+                   "1000 * units.lb_ft\n"
+                << "        )\n"
+                << "        .add_gear(2.97)\n"
+                << "        .add_gear(2.07)\n"
+                << "        .add_gear(1.43)\n"
+                << "        .add_gear(1.00)\n"
+                << "        .add_gear(0.84)\n"
+                << "        .add_gear(0.56);\n"
+                << "}\n\n"
+                << "set_engine("
+                << engineModuleNode
+                << "())\n"
+                << "set_vehicle("
+                   "__ios_legacy_module_vehicle())\n"
+                << "set_transmission("
+                   "__ios_legacy_module_transmission())\n";
+
+            entryPoint.close();
+            entryPointPath = generatedEntryPoint;
+        }
         /*
-         * Old-style engine files define public node main but expect the host
-         * to invoke it. Newer community files may already invoke main()
-         * themselves at file scope.
-         *
-         * Only generate the wrapper when the selected script is NOT already
-         * self-starting.
+         * Loader A: classic public-main files. Newer self-starting files that
+         * already call main() continue to compile directly.
          */
-        if (!scriptInvokesMainAtFileScope(scriptPath)) {
+        else if (!scriptInvokesMainAtFileScope(scriptPath)) {
             generatedEntryPoint =
                 std::filesystem::temp_directory_path()
                 / "engine-sim-picker-entry.mr";
