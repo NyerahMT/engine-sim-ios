@@ -764,6 +764,7 @@ bool EngineSimApplication::loadScript(
 
                     if (normalizedFile) {
                         scriptPath = normalizedScriptPath;
+                        entryPointPath = scriptPath;
 
                         loaderLog(
                             "Loader C normalized community script: "
