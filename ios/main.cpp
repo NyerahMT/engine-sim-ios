@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 
@@ -58,6 +59,89 @@ bool isMrFile(
         });
 
     return extension == ".mr";
+}
+
+bool filesAreIdentical(
+    const fs::path &left,
+    const fs::path &right)
+{
+    std::error_code error;
+
+    const std::uintmax_t leftSize =
+        fs::file_size(
+            left,
+            error);
+
+    if (error) {
+        return false;
+    }
+
+    error.clear();
+
+    const std::uintmax_t rightSize =
+        fs::file_size(
+            right,
+            error);
+
+    if (
+        error
+        || leftSize != rightSize)
+    {
+        return false;
+    }
+
+    std::ifstream leftFile(
+        left,
+        std::ios::in
+            | std::ios::binary);
+
+    std::ifstream rightFile(
+        right,
+        std::ios::in
+            | std::ios::binary);
+
+    if (
+        !leftFile.is_open()
+        || !rightFile.is_open())
+    {
+        return false;
+    }
+
+    constexpr std::size_t BufferSize =
+        16 * 1024;
+
+    char leftBuffer[BufferSize];
+    char rightBuffer[BufferSize];
+
+    while (leftFile && rightFile) {
+        leftFile.read(
+            leftBuffer,
+            static_cast<std::streamsize>(
+                BufferSize));
+
+        rightFile.read(
+            rightBuffer,
+            static_cast<std::streamsize>(
+                BufferSize));
+
+        const std::streamsize leftCount =
+            leftFile.gcount();
+
+        const std::streamsize rightCount =
+            rightFile.gcount();
+
+        if (
+            leftCount != rightCount
+            || !std::equal(
+                leftBuffer,
+                leftBuffer + leftCount,
+                rightBuffer))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /*
@@ -147,8 +231,11 @@ fs::path importEngineFile(
         / source.filename();
 
     /*
-     * Don't silently overwrite an existing engine with a different
-     * downloaded file.
+     * If this exact engine has already been saved, reuse it instead of
+     * creating duplicate "Engine 2.mr", "Engine 3.mr", ... files.
+     *
+     * If a different file happens to use the same filename, preserve both
+     * by finding the next available suffix rather than overwriting either.
      */
     if (
         fs::exists(
@@ -156,6 +243,20 @@ fs::path importEngineFile(
             error)
         && !error)
     {
+        if (
+            filesAreIdentical(
+                source,
+                destination))
+        {
+            std::fprintf(
+                stderr,
+                "Custom engine import: already saved, reusing: %s\n",
+                destination.string().c_str());
+            std::fflush(stderr);
+
+            return destination;
+        }
+
         const std::string stem =
             destination
                 .stem()
