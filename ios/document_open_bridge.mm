@@ -11,14 +11,18 @@
 /*
  * SDL provides this class at runtime.
  *
- * We redeclare the interface here so Engine Simulator can subclass SDL's
- * scene delegate and intercept iOS document-open URLs before SDL has a
- * chance to lose them during a cold launch.
+ * Engine Simulator subclasses it so we can intercept document URLs before
+ * they disappear into SDL's normal event path.
  */
 @interface SDLUIKitSceneDelegate
     : NSObject <UIApplicationDelegate, UIWindowSceneDelegate>
 
 + (NSString *)getSceneDelegateClassName;
+
+- (UISceneConfiguration *)application:(UIApplication *)application
+    configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession
+    options:(UISceneConnectionOptions *)options
+    API_AVAILABLE(ios(13.0));
 
 - (void)scene:(UIScene *)scene
     willConnectToSession:(UISceneSession *)session
@@ -31,12 +35,12 @@ namespace {
 std::mutex g_pendingDocumentMutex;
 std::vector<std::string> g_pendingDocumentPaths;
 
+/*
+ * Write both to stderr and to the persistent Engine Simulator log.
+ */
 void documentBridgeLog(
     const std::string &message)
 {
-    /*
-     * Keep stderr logging for Xcode / console output.
-     */
     std::fprintf(
         stderr,
         "[DocumentBridge] %s\n",
@@ -45,10 +49,6 @@ void documentBridgeLog(
     std::fflush(
         stderr);
 
-    /*
-     * Also write into the same persistent log the engine loader uses so
-     * these messages are visible directly from the phone.
-     */
     const char *home =
         std::getenv("HOME");
 
@@ -80,6 +80,12 @@ void documentBridgeLog(
     log.flush();
 }
 
+/*
+ * Immediately consume an iOS document URL while we still have access to it.
+ *
+ * The file is first staged inside Engine Simulator's own temporary
+ * directory. main.cpp later moves it into Documents/Custom Engines.
+ */
 void queueDocumentURL(
     NSURL *url)
 {
@@ -104,11 +110,6 @@ void queueDocumentURL(
                 : "(null)"
         ));
 
-    /*
-     * Files, Safari, Discord, etc. may give us a security-scoped URL.
-     * Consume it while access is valid and copy the contents somewhere
-     * Engine Simulator owns.
-     */
     const BOOL securityScoped =
         [url startAccessingSecurityScopedResource];
 
@@ -147,9 +148,16 @@ void queueDocumentURL(
                 ? readError.localizedDescription
                 : @"unknown error";
 
+        const char *errorText =
+            description.UTF8String;
+
         documentBridgeLog(
             std::string("Read FAILED: ")
-            + description.UTF8String);
+            + (
+                errorText != nullptr
+                    ? errorText
+                    : "unknown error"
+            ));
 
         return;
     }
@@ -196,16 +204,30 @@ void queueDocumentURL(
                 ? directoryError.localizedDescription
                 : @"unknown error";
 
+        const char *errorText =
+            description.UTF8String;
+
         documentBridgeLog(
             std::string("Directory creation FAILED: ")
-            + description.UTF8String);
+            + (
+                errorText != nullptr
+                    ? errorText
+                    : "unknown error"
+            ));
 
         return;
     }
 
+    const char *directoryText =
+        uniqueDirectory.UTF8String;
+
     documentBridgeLog(
         std::string("Staging directory created: ")
-        + uniqueDirectory.UTF8String);
+        + (
+            directoryText != nullptr
+                ? directoryText
+                : "(null)"
+        ));
 
     NSString *filename =
         url.lastPathComponent;
@@ -245,12 +267,32 @@ void queueDocumentURL(
                 ? writeError.localizedDescription
                 : @"unknown error";
 
+        const char *errorText =
+            description.UTF8String;
+
         documentBridgeLog(
             std::string("Staging FAILED: ")
-            + description.UTF8String);
+            + (
+                errorText != nullptr
+                    ? errorText
+                    : "unknown error"
+            ));
 
         return;
     }
+
+    const char *stagedPathText =
+        stagedPath.UTF8String;
+
+    if (stagedPathText == nullptr) {
+        documentBridgeLog(
+            "Staging FAILED: path could not be converted");
+
+        return;
+    }
+
+    std::size_t queueSize =
+        0;
 
     {
         std::lock_guard<std::mutex>
@@ -258,12 +300,15 @@ void queueDocumentURL(
                 g_pendingDocumentMutex);
 
         g_pendingDocumentPaths.push_back(
-            stagedPath.UTF8String);
+            stagedPathText);
+
+        queueSize =
+            g_pendingDocumentPaths.size();
     }
 
     documentBridgeLog(
         std::string("STAGED: ")
-        + stagedPath.UTF8String
+        + stagedPathText
         + " bytes="
         + std::to_string(
             static_cast<unsigned long long>(
@@ -272,30 +317,35 @@ void queueDocumentURL(
     documentBridgeLog(
         std::string("Pending queue size=")
         + std::to_string(
-            g_pendingDocumentPaths.size()));
+            queueSize));
 }
 
 }
 
 /*
- * Called from main.cpp after Engine Simulator has initialized.
+ * Called by main.cpp.
  *
- * Swapping clears the queue atomically so one document-open event cannot
- * trigger multiple engine loads.
+ * Swapping clears the queue atomically so each incoming document is only
+ * processed once.
  */
 std::vector<std::string>
 engineSimTakePendingDocumentPaths()
 {
-    std::lock_guard<std::mutex>
-        lock(
-            g_pendingDocumentMutex);
-
     std::vector<std::string>
         result;
 
-    result.swap(
-        g_pendingDocumentPaths);
+    {
+        std::lock_guard<std::mutex>
+            lock(
+                g_pendingDocumentMutex);
 
+        result.swap(
+            g_pendingDocumentPaths);
+    }
+
+    /*
+     * Important: log after releasing g_pendingDocumentMutex.
+     */
     if (!result.empty()) {
         documentBridgeLog(
             std::string("Handing ")
@@ -308,7 +358,8 @@ engineSimTakePendingDocumentPaths()
 }
 
 /*
- * Custom scene delegate used by Engine Simulator.
+ * Our custom delegate is used both as SDL's application delegate and,
+ * critically, as the actual UIScene delegate.
  */
 @interface EngineSimSceneDelegate
     : SDLUIKitSceneDelegate
@@ -317,10 +368,50 @@ engineSimTakePendingDocumentPaths()
 @implementation EngineSimSceneDelegate
 
 /*
- * Cold launch:
+ * This is the missing piece from the previous build.
  *
- * Engine Simulator wasn't running when the user selected an .mr file.
- * iOS places document URLs in connectionOptions.URLContexts.
+ * SDL's iOS application delegate creates a UISceneConfiguration whose
+ * delegateClass normally points straight back at SDLUIKitSceneDelegate.
+ *
+ * That meant getSceneDelegateClassName() successfully selected this class
+ * as the application delegate, but the actual window scene still belonged
+ * to SDLUIKitSceneDelegate. Consequently our openURLContexts: callback
+ * never ran.
+ *
+ * Override the scene configuration and explicitly make the real UIScene use
+ * EngineSimSceneDelegate.
+ */
+- (UISceneConfiguration *)application:(UIApplication *)application
+    configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession
+    options:(UISceneConnectionOptions *)options
+    API_AVAILABLE(ios(13.0))
+{
+    (void)application;
+    (void)options;
+
+    documentBridgeLog(
+        "Configuring UIScene with EngineSimSceneDelegate");
+
+    UISceneConfiguration *configuration =
+        [
+            [UISceneConfiguration alloc]
+            initWithName:
+                @"EngineSimSceneConfiguration"
+            sessionRole:
+                connectingSceneSession.role
+        ];
+
+    configuration.delegateClass =
+        [EngineSimSceneDelegate class];
+
+    return configuration;
+}
+
+/*
+ * Cold document launch.
+ *
+ * If Engine Simulator wasn't running when the user chose the .mr file,
+ * iOS gives us the document in connectionOptions.URLContexts.
  */
 - (void)scene:(UIScene *)scene
     willConnectToSession:(UISceneSession *)session
@@ -340,6 +431,10 @@ engineSimTakePendingDocumentPaths()
             context.URL);
     }
 
+    /*
+     * Let SDL perform all of its normal scene/window initialization after
+     * we've captured the incoming document.
+     */
     [
         super
         scene:
@@ -352,10 +447,10 @@ engineSimTakePendingDocumentPaths()
 }
 
 /*
- * Warm open:
+ * Warm document open.
  *
- * Engine Simulator is already running/backgrounded and another .mr file is
- * opened with it.
+ * This is called when Engine Simulator already exists and Files/Safari/etc.
+ * asks it to open another .mr.
  */
 - (void)scene:(UIScene *)scene
     openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts
@@ -380,9 +475,8 @@ engineSimTakePendingDocumentPaths()
 @end
 
 /*
- * SDL asks this class method which UIScene delegate it should instantiate.
- * Return ours so document URLs are captured before SDL's callback app needs
- * them.
+ * SDL asks this class method which application/scene delegate class it
+ * should initially use.
  */
 @implementation SDLUIKitSceneDelegate (EngineSimDocumentBridge)
 
