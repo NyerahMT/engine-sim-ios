@@ -4,6 +4,7 @@
 #include "piranha.h"
 
 #include <cstdio>
+#include <cstdint>
 #include <map>
 #include <string>
 
@@ -48,14 +49,6 @@ namespace es_script {
 
             const InputTarget &target = it->second;
 
-            /*
-             * pNodeInput is a pointer to a Piranha input pointer.
-             *
-             * If the C++ builtin registers an input name which the matching
-             * .mr builtin declaration does not expose, Piranha leaves the
-             * inner pointer null. The old code dereferenced it unconditionally
-             * and crashed in Node::readAllInputs().
-             */
             if (target.input == nullptr || *target.input == nullptr) {
                 std::fprintf(
                     stderr,
@@ -69,43 +62,136 @@ namespace es_script {
         }
 
         void readAllInputs() {
+            /*
+             * TEMPORARY DIAGNOSTIC TRACE.
+             *
+             * Intentionally extremely noisy.
+             * Revert this diagnostic commit once the offending
+             * community-engine input has been identified.
+             */
+
+            std::fprintf(
+                stderr,
+                "[ES-NODE-TRACE] BEGIN this=%p node='%s' builtin='%s' inputs=%zu\n",
+                static_cast<void *>(this),
+                getName().c_str(),
+                getBuiltinName().c_str(),
+                m_inputMap.size());
+            std::fflush(stderr);
+
+            std::size_t inputIndex = 0;
+
             for (const auto &entry : m_inputMap) {
                 const std::string &name = entry.first;
                 const InputTarget &target = entry.second;
+
+                std::fprintf(
+                    stderr,
+                    "[ES-NODE-TRACE] PRE this=%p idx=%zu input='%s' slot=%p mem=%p type=%d\n",
+                    static_cast<void *>(this),
+                    inputIndex,
+                    name.c_str(),
+                    static_cast<void *>(target.input),
+                    target.memoryTarget,
+                    static_cast<int>(target.type));
+                std::fflush(stderr);
 
                 if (
                     target.type != InputTarget::Type::Atomic
                     && target.type != InputTarget::Type::Object)
                 {
+                    std::fprintf(
+                        stderr,
+                        "[ES-NODE-TRACE] SKIP this=%p idx=%zu input='%s' reason=bad-type\n",
+                        static_cast<void *>(this),
+                        inputIndex,
+                        name.c_str());
+                    std::fflush(stderr);
+
+                    ++inputIndex;
                     continue;
                 }
 
-                /*
-                 * Do not let a script/API compatibility mismatch turn into a
-                 * native SIGSEGV. This is the exact null dereference shown by
-                 * the iOS crash reports in es_script::Node::readAllInputs().
-                 *
-                 * Leaving memoryTarget untouched preserves the C++ node's
-                 * initialized/default value for optional compatibility inputs.
-                 */
-                if (target.input == nullptr || *target.input == nullptr) {
+                if (target.input == nullptr) {
                     std::fprintf(
                         stderr,
-                        "[EngineSim Script] Missing/unbound input '%s'; keeping default value\n",
+                        "[ES-NODE-TRACE] SKIP this=%p idx=%zu input='%s' reason=null-slot\n",
+                        static_cast<void *>(this),
+                        inputIndex,
                         name.c_str());
+                    std::fflush(stderr);
+
+                    ++inputIndex;
+                    continue;
+                }
+
+                piranha::pNodeInput input = *target.input;
+
+                std::fprintf(
+                    stderr,
+                    "[ES-NODE-TRACE] SLOT this=%p idx=%zu input='%s' value=%p\n",
+                    static_cast<void *>(this),
+                    inputIndex,
+                    name.c_str(),
+                    static_cast<void *>(input));
+                std::fflush(stderr);
+
+                if (input == nullptr) {
+                    std::fprintf(
+                        stderr,
+                        "[ES-NODE-TRACE] SKIP this=%p idx=%zu input='%s' reason=unbound\n",
+                        static_cast<void *>(this),
+                        inputIndex,
+                        name.c_str());
+                    std::fflush(stderr);
+
+                    ++inputIndex;
                     continue;
                 }
 
                 if (target.memoryTarget == nullptr) {
                     std::fprintf(
                         stderr,
-                        "[EngineSim Script] Input '%s' has no memory target; skipping\n",
+                        "[ES-NODE-TRACE] SKIP this=%p idx=%zu input='%s' reason=null-memory-target\n",
+                        static_cast<void *>(this),
+                        inputIndex,
                         name.c_str());
+                    std::fflush(stderr);
+
+                    ++inputIndex;
                     continue;
                 }
 
-                (*target.input)->fullCompute(target.memoryTarget);
+                std::fprintf(
+                    stderr,
+                    "[ES-NODE-TRACE] COMPUTE-BEGIN this=%p idx=%zu input='%s' output=%p target=%p\n",
+                    static_cast<void *>(this),
+                    inputIndex,
+                    name.c_str(),
+                    static_cast<void *>(input),
+                    target.memoryTarget);
+                std::fflush(stderr);
+
+                input->fullCompute(target.memoryTarget);
+
+                std::fprintf(
+                    stderr,
+                    "[ES-NODE-TRACE] COMPUTE-END this=%p idx=%zu input='%s'\n",
+                    static_cast<void *>(this),
+                    inputIndex,
+                    name.c_str());
+                std::fflush(stderr);
+
+                ++inputIndex;
             }
+
+            std::fprintf(
+                stderr,
+                "[ES-NODE-TRACE] END this=%p node='%s' builtin='%s'\n",
+                static_cast<void *>(this),
+                getName().c_str(),
+                getBuiltinName().c_str());
+            std::fflush(stderr);
         }
 
         void addInput(
