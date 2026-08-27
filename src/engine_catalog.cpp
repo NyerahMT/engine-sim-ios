@@ -7,6 +7,9 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include <cctype>
+#include <fstream>
+#include <iterator>
 
 namespace {
 
