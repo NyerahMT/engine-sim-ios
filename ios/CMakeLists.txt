@@ -102,7 +102,7 @@ add_subdirectory(
 # The visualization target contains EngineSimApplication::tick().
 #
 # Mark that target as iOS as well so it can select the
-# mobile-specific 60 FPS presentation cadence.
+# mobile-specific presentation cadence.
 #
 
 target_compile_definitions(
@@ -157,6 +157,8 @@ add_executable(
     MACOSX_BUNDLE
 
     main.cpp
+
+    document_open_bridge.mm
 
     ios_platform_sdl.cpp
 
