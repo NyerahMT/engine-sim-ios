@@ -8,12 +8,18 @@ function(engine_sim_require_sdl3)
     # SDL 3.4.0 fixes the global CADisplayLink used by the callback
     # application host so iOS can actually drive us above 60 Hz.
     #
+    # SDL 3.4.10 also fixes iOS cold-start document opens where the
+    # SDL_EVENT_DROP_FILE was previously emitted before SDL's event system
+    # was ready and silently lost. Use the current 3.4.x bugfix release so
+    # tapping/opening an .mr file can launch Engine Simulator and deliver
+    # the file to our import-and-save path.
+    #
     # Pin the known-good release so CI does not silently pick an
     # arbitrary runner-installed SDL version.
     #
     find_package(
         SDL3
-        3.4.0
+        3.4.12
         EXACT
         CONFIG
         QUIET
@@ -30,7 +36,7 @@ function(engine_sim_require_sdl3)
             https://github.com/libsdl-org/SDL.git
 
             GIT_TAG
-            release-3.4.0
+            release-3.4.12
 
             GIT_SHALLOW
             TRUE
@@ -49,8 +55,8 @@ function(engine_sim_require_sdl3)
         message(
             FATAL_ERROR
 
-            "SDL3 3.4.0 was not found. "
-            "Install SDL3 3.4.0 or configure with "
+            "SDL3 3.4.12 was not found. "
+            "Install SDL3 3.4.12 or configure with "
             "-DENGINE_SIM_FETCH_SDL3=ON."
         )
     endif()

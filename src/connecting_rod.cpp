@@ -70,17 +70,10 @@ void ConnectingRod::getRodJournalPositionGlobal(int i, double *x, double *y) {
 }
 
 int ConnectingRod::getLayer() const {
-    /*
-     * Crank journal index is not a visual depth layer.
-     *
-     * Using the journal number here makes ordinary V/W engines render
-     * progressively farther "back" and darker as journal indices increase.
-     * Keep normal rods on the foreground layer. Master/slave assemblies
-     * continue to inherit the master's visual layer.
-     */
     if (m_master != nullptr) {
         return m_master->getLayer();
     }
-
-    return 0;
+    else {
+        return getJournal();
+    }
 }
