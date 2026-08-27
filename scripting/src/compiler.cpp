@@ -208,7 +208,6 @@ bool es_script::Compiler::compile(
     fs::path errorLogPath =
         "error_log.log";
 
-#if defined(ENGINE_SIM_IOS)
     const char *home =
         std::getenv("HOME");
 
@@ -216,31 +215,35 @@ bool es_script::Compiler::compile(
         home != nullptr
         && home[0] != '\0')
     {
-        errorLogPath =
+        const fs::path documents =
             fs::path(home)
-            / "Documents"
-            / "engine-sim.log";
+            / "Documents";
+
+        std::error_code documentsError;
+
+        if (
+            fs::exists(
+                documents,
+                documentsError)
+            && !documentsError)
+        {
+            errorLogPath =
+                documents
+                / "engine-sim.log";
+        }
     }
-#endif
 
     std::ofstream file(
         errorLogPath,
-#if defined(ENGINE_SIM_IOS)
         std::ios::out
-            | std::ios::app
-#else
-        std::ios::out
-#endif
-    );
+            | std::ios::app);
 
-#if defined(ENGINE_SIM_IOS)
     if (file.is_open()) {
         file
             << "[Compiler] BEGIN "
             << path.toString()
             << std::endl;
     }
-#endif
 
     piranha::IrCompilationUnit *unit =
         m_compiler->compile(path);
@@ -284,7 +287,6 @@ bool es_script::Compiler::compile(
         }
     }
 
-#if defined(ENGINE_SIM_IOS)
     if (file.is_open()) {
         file
             << "[Compiler] "
@@ -293,7 +295,6 @@ bool es_script::Compiler::compile(
             << path.toString()
             << std::endl;
     }
-#endif
 
     file.close();
 
