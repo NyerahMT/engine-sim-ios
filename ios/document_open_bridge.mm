@@ -2,6 +2,8 @@
 #import <Foundation/Foundation.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -30,15 +32,52 @@ std::mutex g_pendingDocumentMutex;
 std::vector<std::string> g_pendingDocumentPaths;
 
 void documentBridgeLog(
-    const char *message)
+    const std::string &message)
 {
+    /*
+     * Keep stderr logging for Xcode / console output.
+     */
     std::fprintf(
         stderr,
         "[DocumentBridge] %s\n",
-        message);
+        message.c_str());
 
     std::fflush(
         stderr);
+
+    /*
+     * Also write into the same persistent log the engine loader uses so
+     * these messages are visible directly from the phone.
+     */
+    const char *home =
+        std::getenv("HOME");
+
+    if (
+        home == nullptr
+        || home[0] == '\0')
+    {
+        return;
+    }
+
+    const std::string logPath =
+        std::string(home)
+        + "/Documents/engine-sim.log";
+
+    std::ofstream log(
+        logPath,
+        std::ios::out
+            | std::ios::app);
+
+    if (!log.is_open()) {
+        return;
+    }
+
+    log
+        << "[DocumentBridge] "
+        << message
+        << '\n';
+
+    log.flush();
 }
 
 void queueDocumentURL(
@@ -54,21 +93,32 @@ void queueDocumentURL(
         return;
     }
 
-    std::fprintf(
-        stderr,
-        "[DocumentBridge] Received: %s\n",
-        url.path.UTF8String);
+    const char *urlPath =
+        url.path.UTF8String;
 
-    std::fflush(
-        stderr);
+    documentBridgeLog(
+        std::string("Received: ")
+        + (
+            urlPath != nullptr
+                ? urlPath
+                : "(null)"
+        ));
 
     /*
      * Files, Safari, Discord, etc. may give us a security-scoped URL.
-     * We need to consume it while access is valid and copy the contents
-     * somewhere owned by Engine Simulator.
+     * Consume it while access is valid and copy the contents somewhere
+     * Engine Simulator owns.
      */
     const BOOL securityScoped =
         [url startAccessingSecurityScopedResource];
+
+    documentBridgeLog(
+        std::string("Security-scoped access: ")
+        + (
+            securityScoped
+                ? "granted"
+                : "not required / unavailable"
+        ));
 
     NSError *readError =
         nil;
@@ -92,20 +142,23 @@ void queueDocumentURL(
         data == nil
         || readError != nil)
     {
-        std::fprintf(
-            stderr,
-            "[DocumentBridge] Read FAILED: %s\n",
+        NSString *description =
             readError != nil
-                ? readError
-                    .localizedDescription
-                    .UTF8String
-                : "unknown error");
+                ? readError.localizedDescription
+                : @"unknown error";
 
-        std::fflush(
-            stderr);
+        documentBridgeLog(
+            std::string("Read FAILED: ")
+            + description.UTF8String);
 
         return;
     }
+
+    documentBridgeLog(
+        std::string("Read SUCCESS bytes=")
+        + std::to_string(
+            static_cast<unsigned long long>(
+                data.length)));
 
     NSString *temporaryRoot =
         [
@@ -138,20 +191,21 @@ void queueDocumentURL(
         ];
 
     if (!directoryCreated) {
-        std::fprintf(
-            stderr,
-            "[DocumentBridge] Directory creation FAILED: %s\n",
+        NSString *description =
             directoryError != nil
-                ? directoryError
-                    .localizedDescription
-                    .UTF8String
-                : "unknown error");
+                ? directoryError.localizedDescription
+                : @"unknown error";
 
-        std::fflush(
-            stderr);
+        documentBridgeLog(
+            std::string("Directory creation FAILED: ")
+            + description.UTF8String);
 
         return;
     }
+
+    documentBridgeLog(
+        std::string("Staging directory created: ")
+        + uniqueDirectory.UTF8String);
 
     NSString *filename =
         url.lastPathComponent;
@@ -186,17 +240,14 @@ void queueDocumentURL(
         ];
 
     if (!written) {
-        std::fprintf(
-            stderr,
-            "[DocumentBridge] Staging FAILED: %s\n",
+        NSString *description =
             writeError != nil
-                ? writeError
-                    .localizedDescription
-                    .UTF8String
-                : "unknown error");
+                ? writeError.localizedDescription
+                : @"unknown error";
 
-        std::fflush(
-            stderr);
+        documentBridgeLog(
+            std::string("Staging FAILED: ")
+            + description.UTF8String);
 
         return;
     }
@@ -210,15 +261,18 @@ void queueDocumentURL(
             stagedPath.UTF8String);
     }
 
-    std::fprintf(
-        stderr,
-        "[DocumentBridge] STAGED: %s (%lu bytes)\n",
-        stagedPath.UTF8String,
-        static_cast<unsigned long>(
-            data.length));
+    documentBridgeLog(
+        std::string("STAGED: ")
+        + stagedPath.UTF8String
+        + " bytes="
+        + std::to_string(
+            static_cast<unsigned long long>(
+                data.length)));
 
-    std::fflush(
-        stderr);
+    documentBridgeLog(
+        std::string("Pending queue size=")
+        + std::to_string(
+            g_pendingDocumentPaths.size()));
 }
 
 }
@@ -226,8 +280,8 @@ void queueDocumentURL(
 /*
  * Called from main.cpp after Engine Simulator has initialized.
  *
- * Swapping rather than copying also clears the queue atomically, preventing
- * the same iOS document-open event from loading the engine more than once.
+ * Swapping clears the queue atomically so one document-open event cannot
+ * trigger multiple engine loads.
  */
 std::vector<std::string>
 engineSimTakePendingDocumentPaths()
@@ -241,6 +295,14 @@ engineSimTakePendingDocumentPaths()
 
     result.swap(
         g_pendingDocumentPaths);
+
+    if (!result.empty()) {
+        documentBridgeLog(
+            std::string("Handing ")
+            + std::to_string(
+                result.size())
+            + " queued document(s) to EngineSim");
+    }
 
     return result;
 }
@@ -258,20 +320,17 @@ engineSimTakePendingDocumentPaths()
  * Cold launch:
  *
  * Engine Simulator wasn't running when the user selected an .mr file.
- * iOS puts the document URL in connectionOptions.
+ * iOS places document URLs in connectionOptions.URLContexts.
  */
 - (void)scene:(UIScene *)scene
     willConnectToSession:(UISceneSession *)session
     options:(UISceneConnectionOptions *)connectionOptions
 {
-    std::fprintf(
-        stderr,
-        "[DocumentBridge] Scene cold-start URL count: %lu\n",
-        static_cast<unsigned long>(
-            connectionOptions.URLContexts.count));
-
-    std::fflush(
-        stderr);
+    documentBridgeLog(
+        std::string("Scene cold-start URL count=")
+        + std::to_string(
+            static_cast<unsigned long long>(
+                connectionOptions.URLContexts.count)));
 
     for (
         UIOpenURLContext *context
@@ -293,9 +352,9 @@ engineSimTakePendingDocumentPaths()
 }
 
 /*
- * Warm launch:
+ * Warm open:
  *
- * Engine Simulator is already alive/backgrounded and another .mr file is
+ * Engine Simulator is already running/backgrounded and another .mr file is
  * opened with it.
  */
 - (void)scene:(UIScene *)scene
@@ -303,14 +362,11 @@ engineSimTakePendingDocumentPaths()
 {
     (void)scene;
 
-    std::fprintf(
-        stderr,
-        "[DocumentBridge] Scene warm-open URL count: %lu\n",
-        static_cast<unsigned long>(
-            URLContexts.count));
-
-    std::fflush(
-        stderr);
+    documentBridgeLog(
+        std::string("Scene warm-open URL count=")
+        + std::to_string(
+            static_cast<unsigned long long>(
+                URLContexts.count)));
 
     for (
         UIOpenURLContext *context
@@ -324,14 +380,17 @@ engineSimTakePendingDocumentPaths()
 @end
 
 /*
- * SDL asks this method which scene-delegate class it should instantiate.
- * Return ours so document URLs are captured before the SDL callback
- * application needs them.
+ * SDL asks this class method which UIScene delegate it should instantiate.
+ * Return ours so document URLs are captured before SDL's callback app needs
+ * them.
  */
 @implementation SDLUIKitSceneDelegate (EngineSimDocumentBridge)
 
 + (NSString *)getSceneDelegateClassName
 {
+    documentBridgeLog(
+        "SDL requested scene delegate; returning EngineSimSceneDelegate");
+
     return
         @"EngineSimSceneDelegate";
 }
