@@ -20,6 +20,13 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
+
+/*
+ * Implemented by document_open_bridge.mm.
+ */
+std::vector<std::string>
+engineSimTakePendingDocumentPaths();
 
 namespace {
 
@@ -148,7 +155,7 @@ bool filesAreIdentical(
  * Copy a document handed to us by iOS into the application's permanent
  * custom-engine directory.
  *
- * If the file is already there, simply return the existing path.
+ * If the exact same file is already present, reuse it.
  */
 fs::path importEngineFile(
     const fs::path &source)
@@ -173,6 +180,8 @@ fs::path importEngineFile(
             "Custom engine import: source does not exist: %s\n",
             source.string().c_str());
 
+        std::fflush(stderr);
+
         return {};
     }
 
@@ -193,12 +202,14 @@ fs::path importEngineFile(
             "Custom engine import: could not create directory: %s\n",
             error.message().c_str());
 
+        std::fflush(stderr);
+
         return {};
     }
 
     /*
-     * If Files already handed us something inside Custom Engines,
-     * don't make another copy.
+     * If the handed-off document is already physically inside the
+     * Custom Engines directory, just use it directly.
      */
     std::error_code canonicalError;
 
@@ -231,11 +242,10 @@ fs::path importEngineFile(
         / source.filename();
 
     /*
-     * If this exact engine has already been saved, reuse it instead of
-     * creating duplicate "Engine 2.mr", "Engine 3.mr", ... files.
+     * If this exact engine is already saved, reuse it.
      *
-     * If a different file happens to use the same filename, preserve both
-     * by finding the next available suffix rather than overwriting either.
+     * If something else uses the same filename, preserve both by assigning
+     * a suffix rather than overwriting the existing engine.
      */
     if (
         fs::exists(
@@ -252,6 +262,7 @@ fs::path importEngineFile(
                 stderr,
                 "Custom engine import: already saved, reusing: %s\n",
                 destination.string().c_str());
+
             std::fflush(stderr);
 
             return destination;
@@ -295,9 +306,12 @@ fs::path importEngineFile(
 
     std::fprintf(
         stderr,
-        "Custom engine import: copying\n  source: %s\n  destination: %s\n",
+        "Custom engine import: copying\n"
+        "  source: %s\n"
+        "  destination: %s\n",
         source.string().c_str(),
         destination.string().c_str());
+
     std::fflush(stderr);
 
     fs::copy_file(
@@ -311,15 +325,15 @@ fs::path importEngineFile(
             stderr,
             "Custom engine import failed during copy: %s\n",
             error.message().c_str());
+
         std::fflush(stderr);
 
         return {};
     }
 
     /*
-     * Do not treat the iOS document handoff as successful until the
-     * permanent copy can be observed and contains data. The source URL/path
-     * may only be usable for the duration of the open-document handoff.
+     * Don't report success until the permanent copy actually exists and
+     * contains data.
      */
     error.clear();
 
@@ -333,6 +347,7 @@ fs::path importEngineFile(
             stderr,
             "Custom engine import failed verification: destination missing: %s\n",
             destination.string().c_str());
+
         std::fflush(stderr);
 
         return {};
@@ -353,9 +368,11 @@ fs::path importEngineFile(
             stderr,
             "Custom engine import failed verification: invalid saved file: %s\n",
             destination.string().c_str());
+
         std::fflush(stderr);
 
         std::error_code cleanupError;
+
         fs::remove(
             destination,
             cleanupError);
@@ -369,6 +386,7 @@ fs::path importEngineFile(
         destination.string().c_str(),
         static_cast<std::uintmax_t>(
             savedSize));
+
     std::fflush(stderr);
 
     return destination;
@@ -388,15 +406,6 @@ class EngineSimIOSApplication final
 {
 public:
 
-    /*
-     * Reset our wall-clock frame timer after returning from the
-     * background.
-     *
-     * Without this, the first foreground frame can inherit the entire
-     * suspension interval as its elapsed time. The normal dt clamp protects
-     * physics, but resetting the clock is cleaner and avoids artificial
-     * FPS/timing spikes.
-     */
     void resetFrameClock()
     {
         if (m_platform == nullptr) {
@@ -536,6 +545,8 @@ public:
                     stderr,
                     "Engine script failed to load:\n%s\n",
                     selectedScript.c_str());
+
+                std::fflush(stderr);
             }
         }
 
@@ -564,10 +575,6 @@ struct EngineSimIOSState
     bool rendererInitialized =
         false;
 
-    /*
-     * These can be changed by SDL's immediate lifecycle-event dispatch,
-     * so keep them atomic.
-     */
     std::atomic<bool> suspended{
         false
     };
@@ -580,6 +587,84 @@ struct EngineSimIOSState
         false
     };
 };
+
+/*
+ * Pull any URLs captured by document_open_bridge.mm into the ordinary
+ * Engine Simulator import/load path.
+ */
+static void processNativeDocumentImports(
+    EngineSimIOSState *state)
+{
+    if (
+        state == nullptr
+        || !state->applicationInitialized)
+    {
+        return;
+    }
+
+    std::vector<std::string>
+        pending =
+            engineSimTakePendingDocumentPaths();
+
+    if (pending.empty()) {
+        return;
+    }
+
+    std::fprintf(
+        stderr,
+        "[DocumentBridge] EngineSim processing %zu queued document(s)\n",
+        pending.size());
+
+    std::fflush(stderr);
+
+    for (
+        const std::string &path
+        : pending)
+    {
+        std::fprintf(
+            stderr,
+            "[DocumentBridge] Import BEGIN: %s\n",
+            path.c_str());
+
+        std::fflush(stderr);
+
+        const fs::path imported =
+            importEngineFile(
+                fs::path(path));
+
+        if (imported.empty()) {
+            std::fprintf(
+                stderr,
+                "[DocumentBridge] Import FAILED: %s\n",
+                path.c_str());
+
+            std::fflush(stderr);
+
+            continue;
+        }
+
+        std::fprintf(
+            stderr,
+            "[DocumentBridge] Import SUCCESS: %s\n",
+            imported.string().c_str());
+
+        std::fflush(stderr);
+
+        /*
+         * Make the newly imported engine immediately visible in the custom
+         * engine picker.
+         */
+        refreshEngineCatalog();
+
+        /*
+         * Use the same safe deferred engine-switch path as picker buttons.
+         */
+        state
+            ->application
+            .requestEngineScript(
+                imported.string());
+    }
+}
 
 static void printPathStatus(
     const RuntimePaths &paths)
@@ -703,7 +788,8 @@ SDL_AppResult SDL_AppInit(
                 .applicationDirectory(),
             {});
 
-    printPathStatus(paths);
+    printPathStatus(
+        paths);
 
     const fs::path shaderDirectory =
         paths.assetDirectory
@@ -741,11 +827,19 @@ SDL_AppResult SDL_AppInit(
 
     refreshEngineCatalog();
 
+    /*
+     * If this launch happened because the user opened an .mr file, UIKit
+     * may already have staged it before SDL_AppInit ran.
+     */
+    processNativeDocumentImports(
+        state);
+
     std::printf(
         "========================================\n"
         " Real EngineSim application initialized\n"
         " ProMotion presentation enabled\n"
         " Custom engine importing enabled\n"
+        " Native iOS document bridge enabled\n"
         " iOS lifecycle handling enabled\n"
         "========================================\n");
 
@@ -768,17 +862,6 @@ SDL_AppResult SDL_AppEvent(
         return SDL_APP_CONTINUE;
     }
 
-    /*
-     * iOS lifecycle events.
-     *
-     * SDL's callback host dispatches these events immediately from its
-     * internal event watcher. Do not wait for the ordinary event queue.
-     *
-     * Most importantly, SDL_EVENT_TERMINATING must return SUCCESS
-     * immediately. If we continue rendering/simulating while iOS is trying
-     * to terminate us, FrontBoard gives the process five seconds and then
-     * kills it with 0x8BADF00D.
-     */
     switch (event->type) {
         case SDL_EVENT_TERMINATING:
         {
@@ -825,9 +908,6 @@ SDL_AppResult SDL_AppEvent(
             std::printf(
                 "iOS lifecycle: will enter foreground.\n");
 
-            /*
-             * Stay suspended until DID_ENTER_FOREGROUND.
-             */
             break;
         }
 
@@ -836,9 +916,6 @@ SDL_AppResult SDL_AppEvent(
             std::printf(
                 "iOS lifecycle: entered foreground.\n");
 
-            /*
-             * Reset timing on the next iterate before simulation resumes.
-             */
             state->resumePending.store(
                 true,
                 std::memory_order_release);
@@ -864,9 +941,10 @@ SDL_AppResult SDL_AppEvent(
     }
 
     /*
-     * SDL translates an iOS document-open/drop operation into a DROP_FILE
-     * event. That gives us a real filesystem path to the document handed
-     * over by Files, Safari, Discord, etc.
+     * Keep SDL's normal DROP_FILE path as a fallback.
+     *
+     * The native UIKit bridge handles the unreliable cold-start case, but
+     * if SDL successfully delivers a file itself we still accept it.
      */
     if (
         event->type
@@ -878,7 +956,7 @@ SDL_AppResult SDL_AppEvent(
             event->drop.data);
 
         std::printf(
-            "Received document from iOS:\n%s\n",
+            "Received document from SDL:\n%s\n",
             source.string().c_str());
 
         const fs::path imported =
@@ -886,17 +964,8 @@ SDL_AppResult SDL_AppEvent(
                 source);
 
         if (!imported.empty()) {
-            /*
-             * Make it immediately visible in the picker.
-             */
             refreshEngineCatalog();
 
-            /*
-             * And load it immediately.
-             *
-             * This uses the same deferred engine-switch path as tapping
-             * a picker button, keeping UI destruction safe.
-             */
             if (
                 state
                     ->applicationInitialized)
@@ -909,10 +978,6 @@ SDL_AppResult SDL_AppEvent(
         }
     }
 
-    /*
-     * Do not push ordinary events into EngineSim while the app is
-     * backgrounded or already terminating.
-     */
     if (
         !state->suspended.load(
             std::memory_order_acquire)
@@ -953,10 +1018,6 @@ SDL_AppResult SDL_AppIterate(
         return SDL_APP_FAILURE;
     }
 
-    /*
-     * If iOS has begun termination, do absolutely no additional physics,
-     * UI or rendering work.
-     */
     if (
         state->terminating.load(
             std::memory_order_acquire))
@@ -965,13 +1026,14 @@ SDL_AppResult SDL_AppIterate(
     }
 
     /*
-     * iOS normally stops the display link itself in the background, but
-     * don't depend on that.
+     * Drain native document URLs before checking suspension.
      *
-     * If SDL_AppIterate is invoked while inactive/backgrounded, return
-     * immediately. This prevents EngineSim's simulation and ProMotion
-     * renderer from consuming CPU/GPU while invisible.
+     * This lets a file opened while the app is backgrounded get imported
+     * immediately and queued for loading as soon as we foreground again.
      */
+    processNativeDocumentImports(
+        state);
+
     if (
         state->suspended.load(
             std::memory_order_acquire))
@@ -979,12 +1041,6 @@ SDL_AppResult SDL_AppIterate(
         return SDL_APP_CONTINUE;
     }
 
-    /*
-     * The app may have been suspended for seconds or minutes.
-     *
-     * Reset the frame clock once before resuming so the first foreground
-     * frame is not charged for the whole suspension interval.
-     */
     if (
         state->resumePending.exchange(
             false,
@@ -1025,10 +1081,6 @@ void SDL_AppQuit(
         return;
     }
 
-    /*
-     * Make absolutely sure no later callback tries to run another frame
-     * while teardown is happening.
-     */
     state->terminating.store(
         true,
         std::memory_order_release);
@@ -1040,13 +1092,6 @@ void SDL_AppQuit(
     std::printf(
         "EngineSim iOS shutting down.\n");
 
-    /*
-     * Stop application-owned resources before destroying the renderer or
-     * SDL platform.
-     *
-     * EngineSimApplication::destroy() stops audio first, then releases the
-     * simulation and UI resources.
-     */
     if (
         state
             ->applicationInitialized)
