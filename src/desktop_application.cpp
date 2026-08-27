@@ -14,12 +14,192 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <string>
 
 namespace {
+
 // Compose the engine below the camera origin independently of user pan state.
 constexpr float EngineViewCompositionOffsetY = -0.12f;
+
+/*
+ * Newer community-engine scripts often end with:
+ *
+ *     public node main { ... }
+ *     main()
+ *
+ * The old picker always generated a temporary wrapper that imported the file
+ * and called main() again. That double-runs self-starting community scripts.
+ *
+ * This helper strips comments and quoted strings, then looks for a standalone
+ * top-level-looking "main(" invocation at the start of a source line.
+ */
+bool scriptInvokesMainAtFileScope(const std::filesystem::path &path)
+{
+    std::ifstream file(
+        path,
+        std::ios::in
+            | std::ios::binary);
+
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::string source(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
+
+    std::string cleaned;
+    cleaned.reserve(source.size());
+
+    bool lineComment = false;
+    bool blockComment = false;
+    bool quotedString = false;
+    bool escapeNext = false;
+
+    for (
+        std::size_t i = 0;
+        i < source.size();
+        ++i)
+    {
+        const char c = source[i];
+
+        const char next =
+            (i + 1 < source.size())
+                ? source[i + 1]
+                : '\0';
+
+        if (lineComment) {
+            if (c == '\n') {
+                lineComment = false;
+                cleaned.push_back('\n');
+            }
+
+            continue;
+        }
+
+        if (blockComment) {
+            if (
+                c == '*'
+                && next == '/')
+            {
+                blockComment = false;
+                ++i;
+            }
+
+            continue;
+        }
+
+        if (quotedString) {
+            if (escapeNext) {
+                escapeNext = false;
+                continue;
+            }
+
+            if (c == '\\') {
+                escapeNext = true;
+                continue;
+            }
+
+            if (c == '"') {
+                quotedString = false;
+            }
+
+            continue;
+        }
+
+        if (
+            c == '/'
+            && next == '/')
+        {
+            lineComment = true;
+            ++i;
+            continue;
+        }
+
+        if (
+            c == '/'
+            && next == '*')
+        {
+            blockComment = true;
+            ++i;
+            continue;
+        }
+
+        if (c == '"') {
+            quotedString = true;
+            continue;
+        }
+
+        cleaned.push_back(c);
+    }
+
+    std::size_t lineStart = 0;
+
+    while (lineStart < cleaned.size()) {
+        std::size_t lineEnd =
+            cleaned.find(
+                '\n',
+                lineStart);
+
+        if (lineEnd == std::string::npos) {
+            lineEnd = cleaned.size();
+        }
+
+        std::size_t p = lineStart;
+
+        while (
+            p < lineEnd
+            && std::isspace(
+                static_cast<unsigned char>(
+                    cleaned[p])))
+        {
+            ++p;
+        }
+
+        /*
+         * This intentionally does NOT match:
+         *
+         *     public node main {
+         *
+         * because that line begins with "public", not "main".
+         */
+        if (
+            cleaned.compare(
+                p,
+                4,
+                "main")
+            == 0)
+        {
+            p += 4;
+
+            while (
+                p < lineEnd
+                && std::isspace(
+                    static_cast<unsigned char>(
+                        cleaned[p])))
+            {
+                ++p;
+            }
+
+            if (
+                p < lineEnd
+                && cleaned[p] == '(')
+            {
+                return true;
+            }
+        }
+
+        lineStart =
+            lineEnd + 1;
+    }
+
+    return false;
+}
+
 }
 
 std::string EngineSimApplication::s_buildVersion = "0.2.2";
@@ -103,13 +283,11 @@ bool EngineSimApplication::tick() {
 #if defined(__EMSCRIPTEN__)
     renderIntervalMs = 0;
 #elif defined(ENGINE_SIM_IOS)
-    // Keep the beautiful 60 FPS dashboard when the engine isn't doing work,
-    // then deliberately reserve CPU for simulation/audio while it is running.
     if (m_iceEngine != nullptr && std::abs(m_iceEngine->getRpm()) > 100.0) {
-        renderIntervalMs = 33; // ~30 FPS
+        renderIntervalMs = 33;
     }
     else {
-        renderIntervalMs = 16; // ~60 FPS
+        renderIntervalMs = 16;
     }
 #endif
 
@@ -121,7 +299,6 @@ bool EngineSimApplication::tick() {
 
     const std::uint64_t now = m_platform->ticks();
 
-    // Physics remains tied to real elapsed time, not render FPS.
     const float dt = std::min(
         static_cast<float>(now - m_lastTick) / 1000.0f,
         0.25f);
@@ -148,8 +325,6 @@ bool EngineSimApplication::tick() {
     }
 
     if (m_engineView != nullptr) {
-        // Gauge animations use spring physics. Don't feed them a giant dt if
-        // iOS has a scheduling hitch.
         const float uiDt = std::min(dt, 1.0f / 30.0f);
         m_uiManager.update(uiDt);
     }
@@ -478,19 +653,29 @@ bool EngineSimApplication::loadScript(
     std::filesystem::path generatedEntryPoint;
 
     if (relativeScriptPath != "main.mr") {
-        generatedEntryPoint =
-            std::filesystem::temp_directory_path()
-            / "engine-sim-picker-entry.mr";
+        /*
+         * Old-style engine files define public node main but expect the host
+         * to invoke it. Newer community files may already invoke main()
+         * themselves at file scope.
+         *
+         * Only generate the wrapper when the selected script is NOT already
+         * self-starting.
+         */
+        if (!scriptInvokesMainAtFileScope(scriptPath)) {
+            generatedEntryPoint =
+                std::filesystem::temp_directory_path()
+                / "engine-sim-picker-entry.mr";
 
-        std::ofstream entryPoint(generatedEntryPoint);
+            std::ofstream entryPoint(generatedEntryPoint);
 
-        entryPoint
-            << "import \""
-            << scriptPath.generic_string()
-            << "\"\n\nmain()\n";
+            entryPoint
+                << "import \""
+                << scriptPath.generic_string()
+                << "\"\n\nmain()\n";
 
-        entryPoint.close();
-        entryPointPath = generatedEntryPoint;
+            entryPoint.close();
+            entryPointPath = generatedEntryPoint;
+        }
     }
 
     if (compiler.compile(entryPointPath.string())) {
