@@ -1,0 +1,344 @@
+name: EngineSim iOS Ad Hoc
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-sim-ios-adhoc-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_DIR: build/ios
+  FETCHCONTENT_DIR: ${{ github.workspace }}/.cache/fetchcontent
+  BUNDLE_ID: com.nyerahmt.enginesimulator
+  MARKETING_VERSION: 0.1.0
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+jobs:
+  build-and-sign:
+    name: Build Ad Hoc IPA
+    runs-on: macos-15
+
+    steps:
+      - name: Select Xcode 26+
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XCODE_PATH=""
+
+          get_xcode_major() {
+            local app_path="$1"
+            local first_line version major
+            first_line="$("$app_path/Contents/Developer/usr/bin/xcodebuild" -version 2>&1 | head -n 1)"
+            version="${first_line#Xcode }"
+            major="${version%%.*}"
+            [[ "$major" =~ ^[0-9]+$ ]] && printf '%s\n' "$major" || printf '0\n'
+          }
+
+          if [ -d "/Applications/Xcode.app" ] && [ "$(get_xcode_major /Applications/Xcode.app)" -ge 26 ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            while IFS= read -r candidate; do
+              [ -d "$candidate" ] || continue
+              if [ "$(get_xcode_major "$candidate")" -ge 26 ]; then
+                XCODE_PATH="$candidate"
+              fi
+            done < <(find /Applications -maxdepth 1 -type d -name 'Xcode*.app' -print | sort)
+          fi
+
+          if [ -z "$XCODE_PATH" ]; then
+            echo "ERROR: Xcode 26 or newer was not found."
+            exit 1
+          fi
+
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Restore SDL3 cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/fetchcontent
+          key: enginesim-ios-fetchcontent-v3-${{ hashFiles('cmake/EngineSimSDL.cmake', '.gitmodules') }}
+          restore-keys: |
+            enginesim-ios-fetchcontent-v3-
+            enginesim-ios-fetchcontent-v2-
+            enginesim-ios-fetchcontent-
+
+      - name: Restore incremental iOS build cache
+        id: ios-build-cache
+        uses: actions/cache@v4
+        with:
+          path: build/ios
+          key: enginesim-ios-adhoc-build-xcode26-v1-${{ hashFiles('CMakeLists.txt', 'ios/CMakeLists.txt', 'cmake/**/*.cmake', '.gitmodules') }}
+          restore-keys: |
+            enginesim-ios-adhoc-build-xcode26-v1-
+
+      - name: Prepare compiler tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! brew list bison >/dev/null 2>&1; then
+            brew install bison
+          fi
+
+          if ! brew list flex >/dev/null 2>&1; then
+            brew install flex
+          fi
+
+          echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
+
+      - name: Configure iOS build
+        if: steps.ios-build-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$BUILD_DIR"
+
+          cmake \
+            -S ios \
+            -B "$BUILD_DIR" \
+            -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_DIR" \
+            -DENGINE_SIM_FETCH_SDL3=ON \
+            -DENGINE_SIM_BUILD_SCRIPTING=ON \
+            -DBUILD_SHARED_LIBS=OFF
+
+      - name: Reuse cached iOS configuration
+        if: steps.ios-build-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f "$BUILD_DIR/CMakeCache.txt"
+          echo "Using cached CMake/Xcode build tree."
+          echo "Skipping full iOS configure/probe stage."
+
+      - name: Compile unsigned app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          JOBS="$(sysctl -n hw.ncpu)"
+
+          cmake \
+            --build "$BUILD_DIR" \
+            --config Release \
+            --target EngineSimIOS \
+            --parallel "$JOBS" \
+            -- \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Locate app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$(find "$BUILD_DIR" -type d -path '*Release-iphoneos*' -name 'EngineSim.app' -print | head -n 1)"
+
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH="$(find "$BUILD_DIR" -type d -name 'EngineSim.app' -print | head -n 1)"
+          fi
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: EngineSim.app was not generated."
+            exit 1
+          fi
+
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "Found: $APP_PATH"
+
+      - name: Apply app identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INFO_PLIST="$APP_PATH/Info.plist"
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MARKETING_VERSION" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$INFO_PLIST"
+
+          echo "Bundle ID: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")"
+          echo "Build: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
+
+      - name: Install Ad Hoc signing assets
+        shell: bash
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          ADHOC_PROVISIONING_PROFILE_BASE64: ${{ secrets.ADHOC_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          test -n "$BUILD_CERTIFICATE_BASE64"
+          test -n "$P12_PASSWORD"
+          test -n "$ADHOC_PROVISIONING_PROFILE_BASE64"
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/distribution.p12"
+          PROFILE_PATH="$RUNNER_TEMP/EngineSim-AdHoc.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/adhoc-profile.plist"
+          ENTITLEMENTS_PATH="$RUNNER_TEMP/adhoc-entitlements.plist"
+          KEYCHAIN_PATH="$RUNNER_TEMP/engine-sim-adhoc.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$ADHOC_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" \
+            -P "$P12_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+
+          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST")"
+          PROFILE_APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST")"
+          EXPECTED_SUFFIX=".$BUNDLE_ID"
+
+          if [[ "$PROFILE_APP_ID" != *"$EXPECTED_SUFFIX" ]]; then
+            echo "ERROR: Profile App ID is $PROFILE_APP_ID"
+            echo "Expected suffix: $EXPECTED_SUFFIX"
+            exit 1
+          fi
+
+          if ! /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$PROFILE_PLIST" >/dev/null 2>&1; then
+            echo "ERROR: This does not appear to be an Ad Hoc/device provisioning profile."
+            exit 1
+          fi
+
+          plutil -extract Entitlements xml1 -o "$ENTITLEMENTS_PATH" "$PROFILE_PLIST"
+
+          IDENTITY_OUTPUT="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true)"
+          SIGNING_IDENTITY="$(printf '%s\n' "$IDENTITY_OUTPUT" | awk -F '"' '/Apple Distribution/ {print $2; exit}')"
+
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "ERROR: Apple Distribution signing identity not found."
+            printf '%s\n' "$IDENTITY_OUTPUT"
+            exit 1
+          fi
+
+          echo "Provisioning profile: $PROFILE_NAME"
+          echo "Application identifier: $PROFILE_APP_ID"
+          echo "Signing identity: $SIGNING_IDENTITY"
+
+          echo "PROFILE_PATH=$PROFILE_PATH" >> "$GITHUB_ENV"
+          echo "ENTITLEMENTS_PATH=$ENTITLEMENTS_PATH" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Sign Engine Simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cp "$PROFILE_PATH" "$APP_PATH/embedded.mobileprovision"
+
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            find "$APP_PATH/Frameworks" -type d -name '*.framework' -print0 |
+              while IFS= read -r -d '' framework; do
+                codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" "$framework"
+              done
+
+            find "$APP_PATH/Frameworks" -type f -name '*.dylib' -print0 |
+              while IFS= read -r -d '' dylib; do
+                codesign --force --sign "$SIGNING_IDENTITY" --keychain "$KEYCHAIN_PATH" "$dylib"
+              done
+          fi
+
+          codesign \
+            --force \
+            --sign "$SIGNING_IDENTITY" \
+            --keychain "$KEYCHAIN_PATH" \
+            --entitlements "$ENTITLEMENTS_PATH" \
+            --generate-entitlement-der \
+            "$APP_PATH"
+
+      - name: Verify signed app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f "$APP_PATH/embedded.mobileprovision"
+
+          FINAL_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")"
+          [ "$FINAL_BUNDLE_ID" = "$BUNDLE_ID" ]
+
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+          echo "Signed app:"
+          codesign -d --verbose=4 "$APP_PATH" 2>&1 | grep -E 'Identifier=|TeamIdentifier=|Authority=' || true
+
+      - name: Package Ad Hoc IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf artifacts
+          mkdir -p artifacts/Payload
+          cp -R "$APP_PATH" artifacts/Payload/
+
+          (
+            cd artifacts
+            zip -qry EngineSim-iOS-AdHoc.ipa Payload
+          )
+
+          ls -lh artifacts/EngineSim-iOS-AdHoc.ipa
+
+      - name: Upload Ad Hoc IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: EngineSim-iOS-AdHoc
+          path: artifacts/EngineSim-iOS-AdHoc.ipa
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## EngineSim iOS Ad Hoc"
+            echo
+            echo "If the job succeeded, download the **EngineSim-iOS-AdHoc** artifact."
+            echo
+            echo "Inside it is **EngineSim-iOS-AdHoc.ipa**, signed for the devices in your Ad Hoc provisioning profile."
+            echo
+            echo "Install that IPA over the previous Ad Hoc build to update the app in place."
+          } >> "$GITHUB_STEP_SUMMARY"
