@@ -21,6 +21,7 @@
 #include <iterator>
 #include <string>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -644,6 +645,34 @@ bool EngineSimApplication::loadScript(
     auto loaderLog =
         [](const std::string &message)
         {
+#if defined(ENGINE_SIM_IOS)
+            const char *home =
+                std::getenv("HOME");
+
+            if (
+                home != nullptr
+                && home[0] != '\0')
+            {
+                const std::filesystem::path logPath =
+                    std::filesystem::path(home)
+                    / "Documents"
+                    / "engine-sim.log";
+
+                std::ofstream log(
+                    logPath,
+                    std::ios::out
+                        | std::ios::app);
+
+                if (log.is_open()) {
+                    log
+                        << "[EngineLoader] "
+                        << message
+                        << '\n';
+                    log.flush();
+                }
+            }
+#endif
+
             std::fprintf(
                 stderr,
                 "[EngineLoader] %s\n",
