@@ -213,7 +213,7 @@ public node harmonic_cam_lobe {
         lift: lift,
         steps: steps,
         function: generated_function
-    )    
+    )
 }
 
 public node set_vehicle => __engine_sim__set_vehicle {
@@ -235,4 +235,14 @@ public node add_gear {
 
 public node set_transmission => __engine_sim__set_transmission {
     input transmission [transmission];
+}
+
+public node run {
+    input engine;
+    input transmission;
+    input vehicle;
+
+    set_engine(engine)
+    set_transmission(transmission)
+    set_vehicle(vehicle)
 }
