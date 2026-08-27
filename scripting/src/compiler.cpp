@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <cstdlib>
 
 namespace {
 
@@ -204,16 +205,49 @@ bool es_script::Compiler::compile(
      * On iOS stdout/stderr will also tell us which script failed,
      * while the normal EngineSim UI safely leaves the old engine loaded.
      */
+    fs::path errorLogPath =
+        "error_log.log";
+
+#if defined(ENGINE_SIM_IOS)
+    const char *home =
+        std::getenv("HOME");
+
+    if (
+        home != nullptr
+        && home[0] != '\0')
+    {
+        errorLogPath =
+            fs::path(home)
+            / "Documents"
+            / "engine-sim.log";
+    }
+#endif
+
     std::ofstream file(
-        "error_log.log",
-        std::ios::out);
+        errorLogPath,
+#if defined(ENGINE_SIM_IOS)
+        std::ios::out
+            | std::ios::app
+#else
+        std::ios::out
+#endif
+    );
+
+#if defined(ENGINE_SIM_IOS)
+    if (file.is_open()) {
+        file
+            << "[Compiler] BEGIN "
+            << path.toString()
+            << std::endl;
+    }
+#endif
 
     piranha::IrCompilationUnit *unit =
         m_compiler->compile(path);
 
     if (unit == nullptr) {
         file
-            << "Can't find file: "
+            << "[Compiler] Can't find file: "
             << path.toString()
             << "\n";
     }
@@ -249,6 +283,17 @@ bool es_script::Compiler::compile(
             }
         }
     }
+
+#if defined(ENGINE_SIM_IOS)
+    if (file.is_open()) {
+        file
+            << "[Compiler] "
+            << (successful ? "SUCCESS" : "FAILED")
+            << " "
+            << path.toString()
+            << std::endl;
+    }
+#endif
 
     file.close();
 
