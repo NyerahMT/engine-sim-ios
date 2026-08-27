@@ -695,8 +695,91 @@ bool EngineSimApplication::loadScript(
 
     std::filesystem::path entryPointPath = scriptPath;
     std::filesystem::path generatedEntryPoint;
+    std::filesystem::path normalizedScriptPath;
 
     if (relativeScriptPath != "main.mr") {
+        /*
+         * Loader C stage 1: normalize downloaded/community scripts before
+         * asking the legacy Piranha lexer to parse them.
+         *
+         * Some newer/community .mr files contain literal TAB characters and
+         * CRLF/CR line endings. Preserve the user's original file and compile
+         * a temporary normalized copy instead.
+         */
+        {
+            std::ifstream source(
+                scriptPath,
+                std::ios::in
+                    | std::ios::binary);
+
+            if (source.is_open()) {
+                std::string input(
+                    (std::istreambuf_iterator<char>(source)),
+                    std::istreambuf_iterator<char>());
+
+                std::string normalized;
+                normalized.reserve(input.size() + 64);
+
+                bool changed = false;
+
+                for (std::size_t i = 0; i < input.size(); ++i) {
+                    const char c = input[i];
+
+                    if (c == '\t') {
+                        normalized += "    ";
+                        changed = true;
+                    }
+                    else if (c == '\r') {
+                        normalized += '\n';
+                        changed = true;
+
+                        if (
+                            i + 1 < input.size()
+                            && input[i + 1] == '\n')
+                        {
+                            ++i;
+                        }
+                    }
+                    else {
+                        normalized += c;
+                    }
+                }
+
+                if (changed) {
+                    normalizedScriptPath =
+                        std::filesystem::temp_directory_path()
+                        / "engine-sim-normalized-community.mr";
+
+                    std::ofstream normalizedFile(
+                        normalizedScriptPath,
+                        std::ios::out
+                            | std::ios::binary
+                            | std::ios::trunc);
+
+                    normalizedFile.write(
+                        normalized.data(),
+                        static_cast<std::streamsize>(
+                            normalized.size()));
+                    normalizedFile.close();
+
+                    if (normalizedFile) {
+                        scriptPath = normalizedScriptPath;
+
+                        loaderLog(
+                            "Loader C normalized community script: "
+                            + relativeScriptPath);
+                    }
+                    else {
+                        normalizedScriptPath.clear();
+
+                        loaderLog(
+                            "Loader C normalization write failed; "
+                            "using original script");
+                    }
+                }
+            }
+        }
+
         const std::string engineModuleNode =
             engine_script::findSingleEngineModuleNode(
                 scriptPath);
@@ -832,6 +915,11 @@ bool EngineSimApplication::loadScript(
     if (!generatedEntryPoint.empty()) {
         std::error_code ignored;
         std::filesystem::remove(generatedEntryPoint, ignored);
+    }
+
+    if (!normalizedScriptPath.empty()) {
+        std::error_code ignored;
+        std::filesystem::remove(normalizedScriptPath, ignored);
     }
 
     if (engine != nullptr && vehicle != nullptr && transmission != nullptr) {
