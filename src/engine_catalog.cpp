@@ -4,12 +4,11 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
-#include <cctype>
-#include <fstream>
-#include <iterator>
 
 namespace {
 
@@ -159,24 +158,129 @@ bool isMrFile(const fs::path &path) {
     return extension == ".mr";
 }
 
-bool obviousLibraryFile(const fs::path &path) {
-    std::string stem =
-        path.stem().string();
+/*
+ * Determine whether an .mr script is actually a runnable
+ * Engine Simulator entry point.
+ *
+ * Bundled selectable engines expose:
+ *
+ *     public node main
+ *
+ * Helper/module .mr files are valid scripts too, but they should
+ * not appear in the engine picker as standalone engines.
+ */
+bool scriptExportsMain(const fs::path &path) {
+    std::ifstream file(
+        path,
+        std::ios::in | std::ios::binary);
 
-    std::transform(
-        stem.begin(),
-        stem.end(),
-        stem.begin(),
+    if (!file.is_open()) {
+        return false;
+    }
+
+    const std::string source(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
+
+    const auto isIdentifier =
         [](unsigned char c) {
-            return static_cast<char>(
-                std::tolower(c));
-        });
+            return
+                std::isalnum(c)
+                || c == '_';
+        };
 
-    return
-        stem == "engine_sim"
-        || stem == "utilities"
-        || stem == "constants"
-        || stem == "units";
+    std::size_t position = 0;
+
+    while (
+        (position =
+            source.find(
+                "public",
+                position))
+        != std::string::npos)
+    {
+        /*
+         * Don't accidentally match something like:
+         *
+         *     mypublic
+         */
+        if (
+            position > 0
+            && isIdentifier(
+                static_cast<unsigned char>(
+                    source[position - 1])))
+        {
+            position += 6;
+            continue;
+        }
+
+        std::size_t p =
+            position + 6;
+
+        while (
+            p < source.size()
+            && std::isspace(
+                static_cast<unsigned char>(
+                    source[p])))
+        {
+            ++p;
+        }
+
+        /*
+         * Require:
+         *
+         *     public node
+         */
+        if (
+            source.compare(
+                p,
+                4,
+                "node")
+                != 0
+            || (
+                p + 4 < source.size()
+                && isIdentifier(
+                    static_cast<unsigned char>(
+                        source[p + 4]))))
+        {
+            position += 6;
+            continue;
+        }
+
+        p += 4;
+
+        while (
+            p < source.size()
+            && std::isspace(
+                static_cast<unsigned char>(
+                    source[p])))
+        {
+            ++p;
+        }
+
+        /*
+         * Require:
+         *
+         *     public node main
+         */
+        if (
+            source.compare(
+                p,
+                4,
+                "main")
+                == 0
+            && (
+                p + 4 == source.size()
+                || !isIdentifier(
+                    static_cast<unsigned char>(
+                        source[p + 4]))))
+        {
+            return true;
+        }
+
+        position += 6;
+    }
+
+    return false;
 }
 
 void appendCustomEngines(
@@ -238,18 +342,18 @@ void appendCustomEngines(
             file.is_regular_file(fileError)
             && !fileError
             && isMrFile(file.path())
-            && !obviousLibraryFile(file.path()))
+            && scriptExportsMain(file.path()))
         {
             custom.push_back({
                 "Downloaded Engines",
                 engineNameFromPath(
                     file.path()),
+
                 /*
-                 * Absolute paths are intentional.
+                 * Keep the absolute path to the user's script.
                  *
-                 * std::filesystem path composition keeps an
-                 * absolute RHS absolute when loadScript builds
-                 * the final source path.
+                 * loadScript() already has support for scripts
+                 * located outside the bundled asset directory.
                  */
                 file.path().string()
             });
