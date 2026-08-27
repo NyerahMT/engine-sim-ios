@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <cstdio>
 
 namespace {
 
@@ -640,8 +641,21 @@ bool EngineSimApplication::loadScript(
     const std::string &relativeScriptPath)
 {
 #if defined(ATG_ENGINE_SIM_PIRANHA_ENABLED)
+    auto loaderLog =
+        [](const std::string &message)
+        {
+            std::fprintf(
+                stderr,
+                "[EngineLoader] %s\n",
+                message.c_str());
+            std::fflush(stderr);
+        };
+
+    loaderLog("BEGIN requested=" + relativeScriptPath);
+
     es_script::Compiler compiler;
     compiler.initialize(m_assetPath);
+    loaderLog("Compiler initialized");
 
     Engine *engine = nullptr;
     Vehicle *vehicle = nullptr;
@@ -755,8 +769,23 @@ bool EngineSimApplication::loadScript(
         }
     }
 
+    loaderLog(
+        "Compile BEGIN entryPoint="
+        + entryPointPath.generic_string());
+
     if (compiler.compile(entryPointPath.string())) {
+        loaderLog("Compile SUCCESS");
+        loaderLog("Execute BEGIN");
+
         const es_script::Compiler::Output output = compiler.execute();
+
+        loaderLog(
+            std::string("Execute END engine=")
+            + (output.engine != nullptr ? "set" : "NULL")
+            + " vehicle="
+            + (output.vehicle != nullptr ? "set" : "NULL")
+            + " transmission="
+            + (output.transmission != nullptr ? "set" : "NULL"));
 
         configure(output.applicationSettings);
 
@@ -764,8 +793,12 @@ bool EngineSimApplication::loadScript(
         vehicle = output.vehicle;
         transmission = output.transmission;
     }
+    else {
+        loaderLog("Compile FAILED");
+    }
 
     compiler.destroy();
+    loaderLog("Compiler destroyed");
 
     if (!generatedEntryPoint.empty()) {
         std::error_code ignored;
@@ -773,9 +806,19 @@ bool EngineSimApplication::loadScript(
     }
 
     if (engine != nullptr && vehicle != nullptr && transmission != nullptr) {
+        loaderLog("Install BEGIN");
         loadEngine(engine, vehicle, transmission);
+        loaderLog("SUCCESS engine installed");
         return true;
     }
+
+    loaderLog(
+        std::string("FAILED final outputs engine=")
+        + (engine != nullptr ? "set" : "NULL")
+        + " vehicle="
+        + (vehicle != nullptr ? "set" : "NULL")
+        + " transmission="
+        + (transmission != nullptr ? "set" : "NULL"));
 
     if (m_infoCluster != nullptr) {
         m_infoCluster->setLogMessage("Engine script failed to load");
