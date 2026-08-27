@@ -905,6 +905,25 @@ bool EngineSimApplication::loadScript(
         engine = output.engine;
         vehicle = output.vehicle;
         transmission = output.transmission;
+
+        if (engine != nullptr) {
+            loaderLog(
+                std::string("Runtime engine cylinders=")
+                + std::to_string(
+                    engine->getCylinderCount())
+                + " banks="
+                + std::to_string(
+                    engine->getCylinderBankCount())
+                + " crankshafts="
+                + std::to_string(
+                    engine->getCrankshaftCount())
+                + " exhausts="
+                + std::to_string(
+                    engine->getExhaustSystemCount())
+                + " intakes="
+                + std::to_string(
+                    engine->getIntakeCount()));
+        }
     }
     else {
         loaderLog("Compile FAILED");
