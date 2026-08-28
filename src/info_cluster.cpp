@@ -56,15 +56,11 @@ void InfoCluster::render() {
     const Bounds logoBounds = grid.get(m_bounds, 0, 0, 1, 2);
     drawFrame(logoBounds, 1.0f, m_app->getForegroundColor(), m_app->getBackgroundColor());
 
-    resetShader();
-    const Point logoPosition = getRenderPoint(logoBounds.getPosition(Bounds::center));
-    m_app->getShaders()->SetObjectTransform(
-        ysMath::MatMult(
-            ysMath::TranslationTransform(ysMath::LoadVector(logoPosition.x, logoPosition.y, 0.0f)),
-            ysMath::ScaleTransform(ysMath::LoadVector(
-                logoBounds.width() * 0.58f, logoBounds.height() * 0.72f, 1.0f))));
-    m_app->getShaders()->SetBaseColor(m_app->getForegroundColor());
-    m_app->drawModel("Logo", m_app->getShaders()->GetUiFlags(), 0x12);
+    drawCenteredText(
+        "iES",
+        logoBounds.inset(10.0f),
+        42.0f,
+        Bounds::center);
 
     const Bounds titleBounds = grid.get(m_bounds, 1, 0, 5, 2);
     drawFrame(titleBounds, 1.0f, m_app->getForegroundColor(), m_app->getBackgroundColor());
@@ -77,8 +73,8 @@ void InfoCluster::render() {
         const float requestedWidth = m_app->getTextRenderer()->CalculateWidth(text, requestedHeight);
         return requestedWidth > maximumWidth ? requestedHeight * maximumWidth / requestedWidth : requestedHeight;
     };
-    drawAlignedText("OPEN ENGINE SIMULATOR", titleTextBounds.inset(10.0f).move({ 0.0f, -21.0f }),
-        fittedHeight("OPEN ENGINE SIMULATOR", 42.0f), Bounds::bl, Bounds::bl);
+    drawAlignedText("ENGINE SIMULATOR: iOS", titleTextBounds.inset(10.0f).move({ 0.0f, -21.0f }),
+        fittedHeight("ENGINE SIMULATOR: iOS", 42.0f), Bounds::bl, Bounds::bl);
     drawAlignedText("ORIGINAL BY ANGETHEGREAT", subtitleBounds.inset(10.0f).move({ 0.0f, 3.0f }),
         fittedHeight("ORIGINAL BY ANGETHEGREAT", 24.0f), Bounds::tl, Bounds::tl);
     drawAlignedText("BUILD: v" + EngineSimApplication::getBuildVersion() + " // " __DATE__,

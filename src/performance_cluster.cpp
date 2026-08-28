@@ -729,9 +729,31 @@ void PerformanceCluster::onMouseClick(
 
     if (left.overlaps(mouseLocal)) {
         changeSimulationTimeDivision(-1);
+        return;
     }
     else if (right.overlaps(mouseLocal)) {
         changeSimulationTimeDivision(1);
+        return;
+    }
+
+    const Bounds frequencyCell =
+        simulationFrequencyCellBounds();
+
+    const Bounds frequencyLeft =
+        frequencyCell.horizontalSplit(
+            0.0f,
+            0.18f);
+
+    const Bounds frequencyRight =
+        frequencyCell.horizontalSplit(
+            0.82f,
+            1.0f);
+
+    if (frequencyLeft.overlaps(mouseLocal)) {
+        changeSimulationFrequency(-1);
+    }
+    else if (frequencyRight.overlaps(mouseLocal)) {
+        changeSimulationFrequency(1);
     }
 }
 
@@ -746,6 +768,43 @@ Bounds PerformanceCluster::simulationSpeedCellBounds() const
         m_bounds,
         2,
         0);
+}
+
+Bounds PerformanceCluster::simulationFrequencyCellBounds() const
+{
+    Grid grid;
+
+    grid.h_cells = 3;
+    grid.v_cells = 2;
+
+    return grid.get(
+        m_bounds,
+        2,
+        1);
+}
+
+void PerformanceCluster::changeSimulationFrequency(
+    int direction)
+{
+    if (m_simulator == nullptr || direction == 0) {
+        return;
+    }
+
+    constexpr double step = 1000.0;
+    constexpr double minimum = 1000.0;
+    constexpr double maximum = 50000.0;
+
+    const double current =
+        m_simulator->getSimulationFrequency();
+
+    const double next =
+        std::clamp(
+            std::round(current / step) * step
+                + direction * step,
+            minimum,
+            maximum);
+
+    m_simulator->setSimulationFrequency(next);
 }
 
 void PerformanceCluster::changeSimulationTimeDivision(
@@ -1024,11 +1083,26 @@ void PerformanceCluster::render() {
                 m_inputBufferUsage
                 * 100.0);
 
-    m_simulationFrequencyGauge->m_bounds =
+    const Bounds simulationFrequencyCell =
         grid.get(
             m_bounds,
             2,
             1);
+
+    const Bounds simulationFrequencyLeft =
+        simulationFrequencyCell
+            .horizontalSplit(
+                0.0f,
+                0.18f);
+
+    const Bounds simulationFrequencyRight =
+        simulationFrequencyCell
+            .horizontalSplit(
+                0.82f,
+                1.0f);
+
+    m_simulationFrequencyGauge->m_bounds =
+        simulationFrequencyCell;
 
     m_simulationFrequencyGauge
         ->m_gauge
@@ -1045,6 +1119,14 @@ void PerformanceCluster::render() {
 
     drawTimeChevron(
         simulationSpeedRight,
+        true);
+
+    drawTimeChevron(
+        simulationFrequencyLeft,
+        false);
+
+    drawTimeChevron(
+        simulationFrequencyRight,
         true);
 }
 

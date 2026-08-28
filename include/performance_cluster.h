@@ -39,8 +39,12 @@ class PerformanceCluster : public UiElement {
 
     protected:
         Bounds simulationSpeedCellBounds() const;
+        Bounds simulationFrequencyCellBounds() const;
 
         void changeSimulationTimeDivision(
+            int direction);
+
+        void changeSimulationFrequency(
             int direction);
 
         void drawTimeChevron(
