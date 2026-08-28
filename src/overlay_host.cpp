@@ -451,7 +451,7 @@ void OverlayHost::setChildrenVisible() {
 
     if (m_githubButton != nullptr) {
         m_githubButton->setVisible(
-            controls);
+            controls || picker);
     }
 
     if (m_issuesButton != nullptr) {
@@ -617,6 +617,9 @@ void OverlayHost::layoutControls(
         / 2.0f;
 
     if (m_githubButton != nullptr) {
+        m_githubButton->m_text =
+            "GITHUB";
+
         m_githubButton->m_bounds =
             Bounds(
                 buttonWidth,
@@ -724,6 +727,20 @@ void OverlayHost::layoutEnginePicker(
                 .horizontalSplit(
                     0.78f,
                     1.0f);
+    }
+
+    if (m_githubButton != nullptr) {
+        m_githubButton->m_text =
+            "DOWNLOAD ENGINES";
+
+        m_githubButton->m_bounds =
+            content
+                .verticalSplit(
+                    0.88f,
+                    0.98f)
+                .horizontalSplit(
+                    0.16f,
+                    0.49f);
     }
 
     if (
@@ -872,8 +889,14 @@ void OverlayHost::signal(
         element
         == m_githubButton)
     {
-        m_app->getPlatform()->openUrl(
-            "https://github.com/carlesonielfa/open-engine-sim");
+        if (m_kind == Kind::EnginePicker) {
+            m_app->getPlatform()->openUrl(
+                "https://catalog.engine-sim.parts/");
+        }
+        else {
+            m_app->getPlatform()->openUrl(
+                "https://github.com/carlesonielfa/open-engine-sim");
+        }
 
         return;
     }
