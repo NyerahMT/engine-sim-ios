@@ -148,6 +148,23 @@ void es_script::Compiler::initialize(
         assetDirectory
         + "/engines/");
 
+    /*
+     * Community Edition packages are often authored several directories
+     * below the library root and import shared files with paths such as:
+     *
+     *     ../../part-library/part_library.mr
+     *     ../../sound-library/impulse_responses.mr
+     *
+     * A single downloaded .mr file no longer has that original package
+     * hierarchy. Use an existing two-level directory inside assets/es as a
+     * compatibility search root. Walking "../../" from here lands back in
+     * assets/es, so the authored import resolves to the bundled library
+     * without modifying the downloaded engine script.
+     */
+    m_compiler->addSearchPath(
+        assetDirectory
+        + "/es/part-library/parts/");
+
     m_rules.initialize();
 }
 
