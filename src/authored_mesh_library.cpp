@@ -64,14 +64,15 @@ bool loadLogoPng(const std::string &path, AuthoredMeshLibrary::Mesh *mesh) {
     const float aspect = static_cast<float>(height) / static_cast<float>(width);
 
     for (int y = 0; y < height; ++y) {
+        const int sourceY = height - 1 - y;
         int x = 0;
 
         while (x < width) {
-            while (x < width && pixels[(y * width + x) * 4 + 3] < alphaThreshold) ++x;
+            while (x < width && pixels[(sourceY * width + x) * 4 + 3] < alphaThreshold) ++x;
             if (x >= width) break;
 
             const int x0 = x;
-            while (x < width && pixels[(y * width + x) * 4 + 3] >= alphaThreshold) ++x;
+            while (x < width && pixels[(sourceY * width + x) * 4 + 3] >= alphaThreshold) ++x;
             const int x1 = x;
 
             if (mesh->vertices.size() + 4 > 65535) {

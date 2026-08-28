@@ -81,7 +81,7 @@ void InfoCluster::render() {
         fittedHeight("ENGINE SIMULATOR: iOS", 42.0f), Bounds::bl, Bounds::bl);
     drawAlignedText("ORIGINAL BY ANGETHEGREAT", subtitleBounds.inset(10.0f).move({ 0.0f, 3.0f }),
         fittedHeight("ORIGINAL BY ANGETHEGREAT", 24.0f), Bounds::tl, Bounds::tl);
-    drawAlignedText("BUILD: v" + EngineSimApplication::getBuildVersion() + " // " __DATE__,
+    drawAlignedText("PORT BY NYERAHMT",
         buildBounds.inset(10.0f).move({ 0.0f, 4.0f }), 16.0f, Bounds::tl, Bounds::tl);
     drawFrame(toolbarBounds, 1.0f, m_app->getForegroundColor(), m_app->getBackgroundColor());
 
