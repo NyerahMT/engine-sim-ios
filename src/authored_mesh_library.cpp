@@ -13,7 +13,7 @@ struct Vec3 { float x, y, z; };
 bool required(const std::string &name) {
     return name == "Piston" || name == "ConnectingRod" || name == "CylinderHead"
         || name == "Crankshaft" || name == "CrankSnout" || name == "CrankSnoutThreads"
-        || name == "Valve" || name == "Logo";
+        || name == "Valve" || name == "Logo" || name == "LogoIOS";
 }
 
 bool parseIndex(const std::string &token, unsigned int *position, unsigned int *normal) {
@@ -91,7 +91,8 @@ bool AuthoredMeshLibrary::load(const std::string &path) {
     return find("Piston") != nullptr && find("ConnectingRod") != nullptr
         && find("CylinderHead") != nullptr && find("Crankshaft") != nullptr
         && find("CrankSnout") != nullptr && find("CrankSnoutThreads") != nullptr
-        && find("Valve") != nullptr && find("Logo") != nullptr;
+        && find("Valve") != nullptr && find("Logo") != nullptr
+        && find("LogoIOS") != nullptr;
 }
 
 const AuthoredMeshLibrary::Mesh *AuthoredMeshLibrary::find(const std::string &name) const {
