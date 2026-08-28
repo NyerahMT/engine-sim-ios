@@ -216,15 +216,6 @@ void CylinderBankObject::render(
         return;
     }
 
-#if defined(ENGINE_SIM_IOS)
-    const int visualLayer =
-        frontmostPiston
-            ->getCylinderIndex();
-
-    const int renderLayer =
-        0x31
-        - visualLayer;
-#else
     ConnectingRod *rod =
         frontmostPiston
             ->getRod();
@@ -239,7 +230,6 @@ void CylinderBankObject::render(
     const int renderLayer =
         0x31
         - mechanicalLayer;
-#endif
 
     resetShader();
 

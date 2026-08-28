@@ -40,22 +40,12 @@ Piston *SimulationObject::getForemostPiston(CylinderBank *bank, int layer) {
     for (int i = 0; i < cylinderCount; ++i) {
         Piston *piston = engine->getPiston(i);
         if (piston->getCylinderBank() == bank) {
-#if defined(ENGINE_SIM_IOS)
-            const int pistonLayer = piston->getCylinderIndex();
-            if (pistonLayer >= layer) {
-                if (frontmostPiston == nullptr
-                    || pistonLayer < frontmostPiston->getCylinderIndex()) {
-                    frontmostPiston = piston;
-                }
-            }
-#else
             if (piston->getRod()->getJournal() >= layer) {
                 if (frontmostPiston == nullptr
                     || piston->getRod()->getJournal() < frontmostPiston->getRod()->getJournal()) {
                     frontmostPiston = piston;
                 }
             }
-#endif
         }
     }
 

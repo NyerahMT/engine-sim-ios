@@ -26,11 +26,7 @@ void PistonObject::generateGeometry() {
 }
 
 void PistonObject::render(const ViewParameters *view) {
-#if defined(ENGINE_SIM_IOS)
-    const int layer = m_piston->getCylinderIndex();
-#else
     const int layer = m_piston->getRod()->getLayer();
-#endif
     if (layer > view->Layer1 || layer < view->Layer0) return;
 
     const ysVector col = tintByLayer(m_app->getForegroundColor(), layer - view->Layer0);

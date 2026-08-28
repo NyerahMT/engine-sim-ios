@@ -517,7 +517,7 @@ bool SdlGpuRenderer::initialize(
      * is stable.
      */
 
-#if defined(ENGINE_SIM_IOS)
+#if 0
 
     pipelineInfo.target_info.color_target_descriptions =
         &colorTarget;
@@ -1110,7 +1110,7 @@ void SdlGpuRenderer::endFrame()
             SDL_GPU_INDEXELEMENTSIZE_16BIT);
     };
 
-#if defined(ENGINE_SIM_IOS)
+#if 0
 
     /*
      * ========================================================
