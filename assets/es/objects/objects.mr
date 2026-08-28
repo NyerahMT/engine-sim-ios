@@ -110,6 +110,11 @@ public node engine {
     input throttle:
         direct_throttle_linkage(gamma: throttle_gamma);
 
+    // Legacy/community compatibility. Older engine scripts may provide this
+    // synthesizer smoothing value. The current runtime no longer consumes it,
+    // but accepting it keeps those scripts source-compatible.
+    input convolution: 0.0;
+
     input simulation_frequency: 10000;
     input hf_gain: 0.01;
     input jitter: 0.5;
@@ -640,4 +645,24 @@ public node transmission => __engine_sim__transmission {
     input simulate_flex [bool]: false;
 
     alias output __out [transmission_channel];
+}
+
+/*
+ * Legacy/community convenience helper.
+ *
+ * A number of downloadable scripts call default_transmission() directly.
+ * Keep that source form working by supplying a conventional six-speed
+ * fallback through the existing transmission channel/action API.
+ */
+public node default_transmission {
+    alias output __out:
+        transmission(
+            max_clutch_torque: 1000 * units.lb_ft
+        )
+            .add_gear(2.97)
+            .add_gear(2.07)
+            .add_gear(1.43)
+            .add_gear(1.00)
+            .add_gear(0.84)
+            .add_gear(0.56);
 }
