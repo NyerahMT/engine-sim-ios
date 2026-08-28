@@ -216,6 +216,15 @@ void CylinderBankObject::render(
         return;
     }
 
+#if defined(ENGINE_SIM_IOS)
+    const int visualLayer =
+        frontmostPiston
+            ->getCylinderIndex();
+
+    const int renderLayer =
+        0x31
+        - visualLayer;
+#else
     ConnectingRod *rod =
         frontmostPiston
             ->getRod();
@@ -227,22 +236,10 @@ void CylinderBankObject::render(
     const int mechanicalLayer =
         rod->getLayer();
 
-    /*
-     * Pistons currently render at:
-     *
-     *     0x32 - mechanicalLayer
-     *
-     * Put the cylinder wall exactly one render step behind
-     * the piston belonging to that depth.
-     *
-     * This preserves the existing front-to-back convention:
-     *
-     *     deeper crank layers -> lower render number
-     *     foreground layers   -> higher render number
-     */
     const int renderLayer =
         0x31
         - mechanicalLayer;
+#endif
 
     resetShader();
 
