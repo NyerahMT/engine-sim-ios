@@ -70,7 +70,8 @@ void ConnectingRodObject::render(const ViewParameters *view) {
         (m_connectingRod->getPiston()->getCylinderBank()->getIndex() % 2 == 0)
         ? grey0
         : grey1;
-    color = tintByLayer(color, layer - view->Layer0);
+    const int tintLayer = m_connectingRod->getPiston()->getCylinderIndex();
+    color = tintByLayer(color, tintLayer);
 
     resetShader();
     setTransform(
@@ -88,7 +89,7 @@ void ConnectingRodObject::render(const ViewParameters *view) {
 
     if (m_connectingRod->getRodJournalCount() > 0) {
         const ysVector shadow =
-            tintByLayer(grey2, layer - view->Layer0);
+            tintByLayer(grey2, tintLayer);
 
         m_app->getShaders()->SetBaseColor(shadow);
         m_app->drawGenerated(m_pins, 0x32 - layer);

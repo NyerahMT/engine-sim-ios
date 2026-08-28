@@ -29,8 +29,10 @@ void PistonObject::render(const ViewParameters *view) {
     const int layer = m_piston->getRod()->getLayer();
     if (layer > view->Layer1 || layer < view->Layer0) return;
 
-    const ysVector col = tintByLayer(m_app->getForegroundColor(), layer - view->Layer0);
-    const ysVector holeCol = tintByLayer(m_app->getBackgroundColor(), layer - view->Layer0);
+    const int tintLayer = m_piston->getCylinderIndex();
+
+    const ysVector col = tintByLayer(m_app->getForegroundColor(), tintLayer);
+    const ysVector holeCol = tintByLayer(m_app->getBackgroundColor(), tintLayer);
 
     resetShader();
     setTransform(
