@@ -1,8 +1,12 @@
 #include "../include/authored_mesh_library.h"
 
-#define STBI_ONLY_PNG
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
+#if defined(ENGINE_SIM_IOS)
+extern "C" unsigned char *EngineSimLoadPngRgba(
+    const char *path,
+    int *width,
+    int *height);
+extern "C" void EngineSimFreePngRgba(unsigned char *pixels);
+#endif
 
 #include <cstdint>
 #include <cstdlib>
@@ -39,13 +43,19 @@ std::string siblingPath(const std::string &path, const std::string &name) {
 bool loadLogoPng(const std::string &path, AuthoredMeshLibrary::Mesh *mesh) {
     int width = 0;
     int height = 0;
-    int channels = 0;
-    stbi_uc *pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+#if defined(ENGINE_SIM_IOS)
+    unsigned char *pixels =
+        EngineSimLoadPngRgba(path.c_str(), &width, &height);
 
     if (pixels == nullptr || width <= 0 || height <= 0) {
-        if (pixels != nullptr) stbi_image_free(pixels);
+        if (pixels != nullptr) EngineSimFreePngRgba(pixels);
         return false;
     }
+#else
+    (void)path;
+    (void)mesh;
+    return false;
+#endif
 
     mesh->vertices.clear();
     mesh->indices.clear();
@@ -65,7 +75,7 @@ bool loadLogoPng(const std::string &path, AuthoredMeshLibrary::Mesh *mesh) {
             const int x1 = x;
 
             if (mesh->vertices.size() + 4 > 65535) {
-                stbi_image_free(pixels);
+                EngineSimFreePngRgba(pixels);
                 return false;
             }
 
@@ -89,7 +99,7 @@ bool loadLogoPng(const std::string &path, AuthoredMeshLibrary::Mesh *mesh) {
         }
     }
 
-    stbi_image_free(pixels);
+    EngineSimFreePngRgba(pixels);
     return !mesh->vertices.empty() && !mesh->indices.empty();
 }
 }
@@ -155,7 +165,13 @@ bool AuthoredMeshLibrary::load(const std::string &path) {
     }
 
     Mesh &iosLogo = m_meshes["LogoIOS"];
+#if defined(ENGINE_SIM_IOS)
     if (!loadLogoPng(siblingPath(path, "ies_logo.png"), &iosLogo)) return false;
+#else
+    const Mesh *fallbackLogo = find("Logo");
+    if (fallbackLogo == nullptr) return false;
+    iosLogo = *fallbackLogo;
+#endif
 
     return find("Piston") != nullptr && find("ConnectingRod") != nullptr
         && find("CylinderHead") != nullptr && find("Crankshaft") != nullptr

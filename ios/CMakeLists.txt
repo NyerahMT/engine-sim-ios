@@ -160,6 +160,8 @@ add_executable(
 
     document_open_bridge.mm
 
+    png_decode_bridge.mm
+
     ios_platform_sdl.cpp
 
     "${CMAKE_CURRENT_LIST_DIR}/../src/sdl_gpu_renderer.cpp"
