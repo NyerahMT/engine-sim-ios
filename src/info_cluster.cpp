@@ -56,11 +56,91 @@ void InfoCluster::render() {
     const Bounds logoBounds = grid.get(m_bounds, 0, 0, 1, 2);
     drawFrame(logoBounds, 1.0f, m_app->getForegroundColor(), m_app->getBackgroundColor());
 
-    drawCenteredText(
-        "iES",
-        logoBounds.inset(10.0f),
-        42.0f,
-        Bounds::center);
+    // Start with the original authored OES logo so E/S retain the exact
+    // source artwork instead of being recreated with a font.
+    resetShader();
+    const Point logoPosition =
+        getRenderPoint(
+            logoBounds.getPosition(
+                Bounds::center));
+
+    m_app->getShaders()->SetObjectTransform(
+        ysMath::MatMult(
+            ysMath::TranslationTransform(
+                ysMath::LoadVector(
+                    logoPosition.x,
+                    logoPosition.y,
+                    0.0f)),
+            ysMath::ScaleTransform(
+                ysMath::LoadVector(
+                    logoBounds.width() * 0.58f,
+                    logoBounds.height() * 0.72f,
+                    1.0f))));
+
+    m_app->getShaders()->SetBaseColor(
+        m_app->getForegroundColor());
+
+    m_app->drawModel(
+        "Logo",
+        m_app->getShaders()->GetUiFlags(),
+        0x12);
+
+    // The authored mesh reads OES. Cover only its left-hand O and replace it
+    // with a simple geometric lowercase i, leaving the original E/S untouched.
+    const Bounds logoInterior =
+        logoBounds.inset(2.0f);
+
+    const Bounds oldOBounds =
+        logoInterior.horizontalSplit(
+            0.0f,
+            0.355f);
+
+    drawBox(
+        oldOBounds,
+        m_app->getBackgroundColor(),
+        0x13);
+
+    const Bounds iArea =
+        logoInterior
+            .horizontalSplit(
+                0.055f,
+                0.285f)
+            .verticalSplit(
+                0.17f,
+                0.83f);
+
+    const float stemWidth =
+        iArea.width() * 0.24f;
+
+    const Bounds stem(
+        stemWidth,
+        iArea.height() * 0.56f,
+        {
+            iArea.center_h(),
+            iArea.bottom()
+                + iArea.height() * 0.05f
+        },
+        Bounds::bm);
+
+    const Bounds dot(
+        stemWidth,
+        stemWidth,
+        {
+            iArea.center_h(),
+            iArea.top()
+                - iArea.height() * 0.08f
+        },
+        Bounds::tm);
+
+    drawBox(
+        stem,
+        m_app->getForegroundColor(),
+        0x14);
+
+    drawBox(
+        dot,
+        m_app->getForegroundColor(),
+        0x14);
 
     const Bounds titleBounds = grid.get(m_bounds, 1, 0, 5, 2);
     drawFrame(titleBounds, 1.0f, m_app->getForegroundColor(), m_app->getBackgroundColor());
