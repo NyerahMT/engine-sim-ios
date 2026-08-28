@@ -115,6 +115,7 @@ class EngineSimApplication {
         void changeGear(int direction);
         void setTouchStarterHeld(bool held);
         void setTouchThrottle(double value, bool held);
+        void setTouchClutch(double value, bool held);
         // Queued so a picker button cannot destroy the UI tree while its click
         // event is still being dispatched.
         void requestEngineScript(const std::string &relativeScriptPath);
@@ -132,6 +133,8 @@ class EngineSimApplication {
         double m_touchThrottle = 0.0;
         bool m_touchThrottleHeld = false;
         bool m_touchStarterHeld = false;
+        double m_touchClutch = 1.0;
+        bool m_touchClutchHeld = false;
 
         double m_clutchPressure = 1.0;
         double m_targetClutchPressure = 1.0;

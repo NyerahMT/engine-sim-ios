@@ -21,6 +21,10 @@ class LoadSimulationCluster : public UiElement {
         virtual void onMouseDown(const Point &mouseLocal);
         virtual void onMouseUp(const Point &mouseLocal);
         virtual void onMouseClick(const Point &mouseLocal);
+        virtual void onDrag(
+            const Point &p0,
+            const Point &mouse0,
+            const Point &mouse);
         void setUnits();
 
         void setSimulator(Simulator *simulator) { m_simulator = simulator; }
@@ -37,6 +41,9 @@ class LoadSimulationCluster : public UiElement {
         bool isIgnitionOn() const;
         Bounds gearBounds() const;
         Bounds systemStatusBounds() const;
+        Bounds clutchControlBounds() const;
+        void setTouchClutchFromPoint(const Point &mouseLocal);
+        void renderTouchClutchControl();
         int statusRowAt(const Point &mouseLocal) const;
 
         float m_systemStatusLights[4];
@@ -58,6 +65,7 @@ class LoadSimulationCluster : public UiElement {
 
         Simulator *m_simulator;
         bool m_starterHeld = false;
+        bool m_clutchHeld = false;
 };
 
 #endif /* ATG_ENGINE_SIM_LOAD_SIMULATION_CLUSTER_H */

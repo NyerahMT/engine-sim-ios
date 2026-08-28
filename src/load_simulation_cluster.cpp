@@ -160,6 +160,13 @@ void LoadSimulationCluster::update(float dt) {
 
 void LoadSimulationCluster::onMouseDown(const Point &mouseLocal) {
     UiElement::onMouseDown(mouseLocal);
+
+    if (clutchControlBounds().overlaps(mouseLocal)) {
+        m_clutchHeld = true;
+        setTouchClutchFromPoint(mouseLocal);
+        return;
+    }
+
     if (statusRowAt(mouseLocal) == 1) {
         m_starterHeld = true;
         m_app->setTouchStarterHeld(true);
@@ -171,6 +178,21 @@ void LoadSimulationCluster::onMouseUp(const Point &mouseLocal) {
     if (m_starterHeld) {
         m_starterHeld = false;
         m_app->setTouchStarterHeld(false);
+    }
+
+    if (m_clutchHeld) {
+        m_clutchHeld = false;
+        m_app->setTouchClutch(1.0, false);
+    }
+}
+
+void LoadSimulationCluster::onDrag(
+    const Point &,
+    const Point &,
+    const Point &mouse)
+{
+    if (m_clutchHeld) {
+        setTouchClutchFromPoint(mouse);
     }
 }
 
@@ -196,7 +218,8 @@ void LoadSimulationCluster::render() {
     drawCurrentGear(gearBounds());
 
     const Bounds clutchBounds = grid.get(m_bounds, 1, 0);
-    drawClutchPressureGauge(clutchBounds);
+    drawClutchPressureGauge(
+        clutchBounds.horizontalSplit(0.0f, 0.82f));
 
     const Bounds systemStatusBounds = grid.get(m_bounds, 0, 0);
     drawSystemStatus(systemStatusBounds);
@@ -229,6 +252,7 @@ void LoadSimulationCluster::render() {
     m_hpGauge->m_bounds = horsepowerBounds;
 
     UiElement::render();
+    renderTouchClutchControl();
 }
 
 void LoadSimulationCluster::drawCurrentGear(const Bounds &bounds) {
@@ -293,6 +317,55 @@ Bounds LoadSimulationCluster::gearBounds() const {
 Bounds LoadSimulationCluster::systemStatusBounds() const {
     Grid grid = { 3, 2 };
     return grid.get(m_bounds, 0, 0);
+}
+
+Bounds LoadSimulationCluster::clutchControlBounds() const {
+    Grid grid = { 3, 2 };
+    const Bounds clutch = grid.get(m_bounds, 1, 0);
+
+    return clutch
+        .horizontalSplit(0.84f, 0.96f)
+        .verticalSplit(0.12f, 0.82f);
+}
+
+void LoadSimulationCluster::setTouchClutchFromPoint(
+    const Point &mouseLocal)
+{
+    const Bounds control = clutchControlBounds();
+
+    const float value = clamp(
+        (mouseLocal.y - control.bottom())
+        / control.height());
+
+    m_app->setTouchClutch(value, true);
+}
+
+void LoadSimulationCluster::renderTouchClutchControl() {
+    const Bounds control = clutchControlBounds();
+
+    const float value = getTransmission() != nullptr
+        ? static_cast<float>(
+            getTransmission()->getClutchPressure())
+        : 0.0f;
+
+    const Bounds fill(
+        control.width() - 4.0f,
+        (control.height() - 4.0f) * value,
+        {
+            control.center_h(),
+            control.bottom() + 2.0f
+        },
+        Bounds::bm);
+
+    drawFrame(
+        control,
+        1.0f,
+        m_app->getForegroundColor(),
+        m_app->getBackgroundColor());
+
+    if (value > 0.0f) {
+        drawBox(fill, m_app->getRed());
+    }
 }
 
 int LoadSimulationCluster::statusRowAt(const Point &mouseLocal) const {

@@ -1095,7 +1095,10 @@ void EngineSimApplication::processEngineInput(float dt) {
     if (m_platform->wasKeyPressed(DesktopKey::Up)) changeGear(1);
     if (m_platform->wasKeyPressed(DesktopKey::Down)) changeGear(-1);
 
-    if (m_platform->isKeyDown(DesktopKey::T)) {
+    if (m_touchClutchHeld) {
+        m_targetClutchPressure = m_touchClutch;
+    }
+    else if (m_platform->isKeyDown(DesktopKey::T)) {
         m_targetClutchPressure -= 0.2 * dt;
     }
     else if (m_platform->isKeyDown(DesktopKey::U)) {
@@ -1197,6 +1200,11 @@ void EngineSimApplication::setTouchStarterHeld(bool held) {
 void EngineSimApplication::setTouchThrottle(double value, bool held) {
     m_touchThrottle = clamp(value);
     m_touchThrottleHeld = held;
+}
+
+void EngineSimApplication::setTouchClutch(double value, bool held) {
+    m_touchClutch = clamp(value);
+    m_touchClutchHeld = held;
 }
 
 void EngineSimApplication::createObjects(Engine *engine) {
@@ -1352,6 +1360,8 @@ void EngineSimApplication::loadEngine(
     m_touchThrottle = 0.0;
     m_touchThrottleHeld = false;
     m_touchStarterHeld = false;
+    m_touchClutch = 1.0;
+    m_touchClutchHeld = false;
     m_clutchPressure = 0.0;
     m_targetClutchPressure = 0.0;
     m_dynoSpeed = 0.0;
