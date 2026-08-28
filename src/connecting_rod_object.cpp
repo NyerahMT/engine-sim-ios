@@ -59,11 +59,7 @@ void ConnectingRodObject::render(const ViewParameters *view) {
     if (m_connectingRod->getRodJournalCount() > 0 && view->Sublayer != 1) return;
     else if (m_connectingRod->getRodJournalCount() == 0 && view->Sublayer != 0) return;
 
-#if defined(ENGINE_SIM_IOS)
-    const int layer = m_connectingRod->getPiston()->getCylinderIndex();
-#else
     const int layer = m_connectingRod->getLayer();
-#endif
     if (layer > view->Layer1 || layer < view->Layer0) return;
 
     const ysVector grey0 = mix(m_app->getBackgroundColor(), m_app->getForegroundColor(), 0.9333f);
