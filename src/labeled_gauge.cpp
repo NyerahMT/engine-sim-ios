@@ -39,7 +39,8 @@ void LabeledGauge::render() {
     const Bounds title = bounds.verticalSplit(1.0f, 0.9f);
     const Bounds gaugeBounds = bounds.verticalSplit(0.0f, 0.9f);
 
-    drawCenteredText(m_title, title.inset(10.0f), 24.0f);
+    const float titleHeight = m_app->largeGaugeText() ? 30.0f : 24.0f;
+    drawCenteredText(m_title, title.inset(10.0f), titleHeight);
 
     const double value = m_gauge->m_value;
 

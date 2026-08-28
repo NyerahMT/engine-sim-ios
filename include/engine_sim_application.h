@@ -109,6 +109,9 @@ class EngineSimApplication {
         void toggleFullscreen();
         void showControlsOverlay();
         void showEnginePickerOverlay();
+        void showSettingsOverlay();
+        bool largeGaugeText() const { return m_largeGaugeText; }
+        void toggleLargeGaugeText() { m_largeGaugeText = !m_largeGaugeText; }
         void changeGear(int direction);
         void setTouchStarterHeld(bool held);
         void setTouchThrottle(double value, bool held);
@@ -179,6 +182,7 @@ class EngineSimApplication {
         SimulationObject::ViewParameters m_viewParameters;
 
         bool m_paused;
+        bool m_largeGaugeText = false;
 
     protected:
         ysVector m_background;

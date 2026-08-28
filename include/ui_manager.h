@@ -22,6 +22,7 @@ class UiManager {
         UiElement *getRoot() { return &m_root; }
         void showControlsOverlay();
         void showEnginePickerOverlay();
+        void showSettingsOverlay();
         bool hasOverlay() const { return m_overlayHost.isVisible(); }
 
     protected:

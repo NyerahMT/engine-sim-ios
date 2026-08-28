@@ -1263,6 +1263,10 @@ void EngineSimApplication::showEnginePickerOverlay() {
     m_uiManager.showEnginePickerOverlay();
 }
 
+void EngineSimApplication::showSettingsOverlay() {
+    m_uiManager.showSettingsOverlay();
+}
+
 void EngineSimApplication::refreshUserInterface() {
     m_uiManager.destroy();
 

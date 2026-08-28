@@ -149,6 +149,7 @@ void OverlayHost::initialize(
     m_closeButton = nullptr;
     m_githubButton = nullptr;
     m_issuesButton = nullptr;
+    m_largeTextButton = nullptr;
 
     m_pickerScrollUpButton =
         nullptr;
@@ -236,6 +237,18 @@ void OverlayHost::initialize(
     m_pickerScrollDownButton->m_inverted =
         true;
 
+    m_largeTextButton =
+        addElement<UiButton>(this);
+
+    m_largeTextButton->m_fontSize =
+        18.0f;
+
+    m_largeTextButton->m_inverted =
+        true;
+
+    m_largeTextButton->m_drawFrame =
+        true;
+
     /*
      * Initial filesystem scan.
      */
@@ -255,6 +268,7 @@ void OverlayHost::destroy() {
     m_closeButton = nullptr;
     m_githubButton = nullptr;
     m_issuesButton = nullptr;
+    m_largeTextButton = nullptr;
 
     m_pickerScrollUpButton =
         nullptr;
@@ -426,9 +440,13 @@ void OverlayHost::setChildrenVisible() {
         m_kind
         == Kind::EnginePicker;
 
+    const bool settings =
+        m_kind
+        == Kind::Settings;
+
     if (m_closeButton != nullptr) {
         m_closeButton->setVisible(
-            controls || picker);
+            controls || picker || settings);
     }
 
     if (m_githubButton != nullptr) {
@@ -439,6 +457,11 @@ void OverlayHost::setChildrenVisible() {
     if (m_issuesButton != nullptr) {
         m_issuesButton->setVisible(
             controls);
+    }
+
+    if (m_largeTextButton != nullptr) {
+        m_largeTextButton->setVisible(
+            settings);
     }
 
     if (
@@ -522,11 +545,42 @@ void OverlayHost::update(float dt) {
     {
         layoutControls(panel);
     }
-    else {
+    else if (
+        m_kind
+        == Kind::EnginePicker)
+    {
         layoutEnginePicker(panel);
+    }
+    else {
+        layoutSettings(panel);
     }
 
     UiElement::update(dt);
+}
+
+void OverlayHost::layoutSettings(
+    const Bounds &panel)
+{
+    const Bounds content = panel.inset(30.0f);
+
+    if (m_closeButton != nullptr) {
+        m_closeButton->m_bounds =
+            content
+                .verticalSplit(0.88f, 0.98f)
+                .horizontalSplit(0.78f, 1.0f);
+    }
+
+    if (m_largeTextButton != nullptr) {
+        m_largeTextButton->m_text =
+            m_app->largeGaugeText()
+                ? "LARGER TEXT: ON"
+                : "LARGER TEXT: OFF";
+
+        m_largeTextButton->m_bounds =
+            content
+                .verticalSplit(0.62f, 0.74f)
+                .horizontalSplit(0.08f, 0.56f);
+    }
 }
 
 void OverlayHost::layoutControls(
@@ -836,6 +890,14 @@ void OverlayHost::signal(
 
     if (
         element
+        == m_largeTextButton)
+    {
+        m_app->toggleLargeGaugeText();
+        return;
+    }
+
+    if (
+        element
         == m_pickerScrollUpButton)
     {
         m_pickerScrollOffset =
@@ -1078,6 +1140,35 @@ void OverlayHost::render() {
 
             ++indexInGroup;
         }
+    }
+    else if (
+        m_kind
+        == Kind::Settings)
+    {
+        drawAlignedText(
+            "SETTINGS",
+            content.verticalSplit(0.90f, 0.98f),
+            28.0f,
+            Bounds::lm,
+            Bounds::lm);
+
+        m_app->getTextRenderer()->SetColor(secondary);
+
+        drawAlignedText(
+            "DISPLAY",
+            content.verticalSplit(0.77f, 0.84f),
+            16.0f,
+            Bounds::lm,
+            Bounds::lm);
+
+        drawAlignedText(
+            "INCREASES GAUGE TITLE TEXT BY 25%",
+            content.verticalSplit(0.53f, 0.60f),
+            14.0f,
+            Bounds::lm,
+            Bounds::lm);
+
+        m_app->getTextRenderer()->SetColor(foreground);
     }
     else {
         /*

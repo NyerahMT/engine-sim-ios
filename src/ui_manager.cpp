@@ -33,6 +33,8 @@ void UiManager::showControlsOverlay() { m_overlayHost.present(OverlayHost::Kind:
 
 void UiManager::showEnginePickerOverlay() { m_overlayHost.present(OverlayHost::Kind::EnginePicker); }
 
+void UiManager::showSettingsOverlay() { m_overlayHost.present(OverlayHost::Kind::Settings); }
+
 UiElement *UiManager::hitTest(const Point &position) {
     if (m_overlayHost.isVisible()) {
         if (UiElement *overlay = m_overlayHost.mouseOver(position)) return overlay;

@@ -27,7 +27,7 @@ protected:
     Engine *m_engine;
     UiButton *m_projectInfoButton;
     UiButton *m_enginePickerButton;
-    UiButton *m_fullscreenButton;
+    UiButton *m_settingsButton;
     std::string m_logMessage;
 };
 

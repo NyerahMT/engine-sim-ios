@@ -11,7 +11,8 @@ public:
     enum class Kind {
         None,
         Controls,
-        EnginePicker
+        EnginePicker,
+        Settings
     };
 
     void initialize(
@@ -42,6 +43,7 @@ private:
     UiButton *m_closeButton = nullptr;
     UiButton *m_githubButton = nullptr;
     UiButton *m_issuesButton = nullptr;
+    UiButton *m_largeTextButton = nullptr;
 
     UiButton *m_pickerScrollUpButton =
         nullptr;
@@ -73,6 +75,9 @@ private:
         const Bounds &panel);
 
     void layoutEnginePicker(
+        const Bounds &panel);
+
+    void layoutSettings(
         const Bounds &panel);
 
     void setChildrenVisible();

@@ -7,7 +7,7 @@
 
 InfoCluster::InfoCluster()
     : m_engine(nullptr), m_projectInfoButton(nullptr), m_enginePickerButton(nullptr),
-      m_fullscreenButton(nullptr), m_logMessage("Started") { }
+      m_settingsButton(nullptr), m_logMessage("Started") { }
 
 InfoCluster::~InfoCluster() = default;
 
@@ -25,11 +25,11 @@ void InfoCluster::initialize(EngineSimApplication *app) {
     m_enginePickerButton->m_inverted = true;
     m_enginePickerButton->m_drawFrame = false;
 
-    m_fullscreenButton = addElement<UiButton>(this);
-    m_fullscreenButton->m_text = "Fullscreen";
-    m_fullscreenButton->m_fontSize = 16.0f;
-    m_fullscreenButton->m_inverted = true;
-    m_fullscreenButton->m_drawFrame = false;
+    m_settingsButton = addElement<UiButton>(this);
+    m_settingsButton->m_text = "SETTINGS";
+    m_settingsButton->m_fontSize = 16.0f;
+    m_settingsButton->m_inverted = true;
+    m_settingsButton->m_drawFrame = false;
 }
 
 void InfoCluster::destroy() { UiElement::destroy(); }
@@ -40,13 +40,13 @@ void InfoCluster::update(float dt) {
     const Bounds toolbar = titleBounds.verticalSplit(0.0f, 0.24f);
     m_enginePickerButton->m_bounds = toolbar.horizontalSplit(0.47f, 0.60f);
     m_projectInfoButton->m_bounds = toolbar.horizontalSplit(0.61f, 0.74f);
-    m_fullscreenButton->m_bounds = toolbar.horizontalSplit(0.75f, 1.0f);
+    m_settingsButton->m_bounds = toolbar.horizontalSplit(0.75f, 1.0f);
     UiElement::update(dt);
 }
 
 void InfoCluster::signal(UiElement *element, Event event) {
     if (event != Event::Clicked) return;
-    if (element == m_fullscreenButton) m_app->toggleFullscreen();
+    if (element == m_settingsButton) m_app->showSettingsOverlay();
     else if (element == m_projectInfoButton) m_app->showControlsOverlay();
     else if (element == m_enginePickerButton) m_app->showEnginePickerOverlay();
 }
