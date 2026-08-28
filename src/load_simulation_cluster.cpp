@@ -218,8 +218,7 @@ void LoadSimulationCluster::render() {
     drawCurrentGear(gearBounds());
 
     const Bounds clutchBounds = grid.get(m_bounds, 1, 0);
-    drawClutchPressureGauge(
-        clutchBounds.horizontalSplit(0.0f, 0.82f));
+    drawClutchPressureGauge(clutchBounds);
 
     const Bounds systemStatusBounds = grid.get(m_bounds, 0, 0);
     drawSystemStatus(systemStatusBounds);
@@ -333,18 +332,18 @@ void LoadSimulationCluster::setTouchClutchFromPoint(
 {
     const Bounds control = clutchControlBounds();
 
-    const float value = clamp(
+    const float pedal = clamp(
         (mouseLocal.y - control.bottom())
         / control.height());
 
-    m_app->setTouchClutch(value, true);
+    m_app->setTouchClutch(1.0f - pedal, true);
 }
 
 void LoadSimulationCluster::renderTouchClutchControl() {
     const Bounds control = clutchControlBounds();
 
     const float value = getTransmission() != nullptr
-        ? static_cast<float>(
+        ? 1.0f - static_cast<float>(
             getTransmission()->getClutchPressure())
         : 0.0f;
 

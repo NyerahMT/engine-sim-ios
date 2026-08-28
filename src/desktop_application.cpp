@@ -308,10 +308,6 @@ bool EngineSimApplication::tick() {
 
     m_lastTick = now;
 
-    if (dt > 0.0f) {
-        m_averageFramerate = 0.9f * m_averageFramerate + 0.1f / dt;
-    }
-
     if (m_platform->wasKeyPressed(DesktopKey::F)) toggleFullscreen();
     if (m_platform->wasKeyPressed(DesktopKey::Tab)) m_screen = (m_screen + 1) % 3;
     if (m_platform->wasKeyPressed(DesktopKey::Return)) loadScript(m_currentScriptPath);
@@ -342,6 +338,17 @@ bool EngineSimApplication::tick() {
     }
 
     if (now - m_lastRenderTick >= renderIntervalMs) {
+        if (m_lastRenderTick != 0) {
+            const double renderDt =
+                static_cast<double>(now - m_lastRenderTick) / 1000.0;
+
+            if (renderDt > 0.0) {
+                m_averageFramerate =
+                    0.9f * m_averageFramerate
+                    + 0.1f * static_cast<float>(1.0 / renderDt);
+            }
+        }
+
         renderScene();
         m_lastRenderTick = now;
     }
