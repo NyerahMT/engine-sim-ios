@@ -279,8 +279,26 @@ add_custom_command(
     "${CMAKE_CURRENT_LIST_DIR}/../assets"
     "$<TARGET_BUNDLE_DIR:EngineSimIOS>/assets"
 
+    COMMAND
+    /usr/libexec/PlistBuddy
+    -c
+    "Set :CFBundleDisplayName Engine Simulator"
+    "$<TARGET_BUNDLE_DIR:EngineSimIOS>/Info.plist"
+
+    COMMAND
+    /usr/libexec/PlistBuddy
+    -c
+    "Set :CFBundleName Engine Simulator"
+    "$<TARGET_BUNDLE_DIR:EngineSimIOS>/Info.plist"
+
+    COMMAND
+    /usr/libexec/PlistBuddy
+    -c
+    "Print :CFBundleDisplayName"
+    "$<TARGET_BUNDLE_DIR:EngineSimIOS>/Info.plist"
+
     COMMENT
-    "Bundling EngineSim runtime assets"
+    "Bundling EngineSim runtime assets and applying iOS display name"
 )
 
 #
