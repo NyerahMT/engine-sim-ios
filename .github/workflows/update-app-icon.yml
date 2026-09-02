@@ -1,0 +1,39 @@
+name: Update iOS app icon
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/update-app-icon.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-icon:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install new app icon
+        run: |
+          set -euo pipefail
+
+          cat .icon-update/part* | base64 -D > /tmp/AppIcon.jpg
+          sips -z 1024 1024 /tmp/AppIcon.jpg --out /tmp/AppIcon-resized.jpg
+          sips -s format png /tmp/AppIcon-resized.jpg --out ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+
+          sips -g pixelWidth -g pixelHeight -g hasAlpha ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+
+          rm -rf .icon-update
+          rm .github/workflows/update-app-icon.yml
+
+          git config user.name "NyerahMT"
+          git config user.email "68287092+NyerahMT@users.noreply.github.com"
+          git add -A
+          git commit -m "Update iOS app icon"
+          git push origin HEAD:master
