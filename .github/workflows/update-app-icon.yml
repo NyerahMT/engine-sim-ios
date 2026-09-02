@@ -23,10 +23,28 @@ jobs:
         run: |
           set -euo pipefail
 
-          cat .icon-update/part* | base64 -D > /tmp/AppIcon.jpg
+          python3 <<'PY'
+          from pathlib import Path
+          import base64
+          import hashlib
+
+          parts = sorted(Path('.icon-update').glob('part*'))
+          encoded = ''
+          for part in parts:
+              clean = ''.join(part.read_text().split())
+              print(part.name, len(clean), hashlib.sha256(clean.encode()).hexdigest())
+              encoded += clean
+
+          data = base64.b64decode(encoded, validate=True)
+          digest = hashlib.sha256(data).hexdigest()
+          print('decoded', len(data), digest)
+          if digest != 'e06e5becf6fb7a8330956f2e02322f24266ca3548f4f06176751cb33a7ad8370':
+              raise SystemExit('staged app icon payload checksum mismatch')
+          Path('/tmp/AppIcon.jpg').write_bytes(data)
+          PY
+
           sips -z 1024 1024 /tmp/AppIcon.jpg --out /tmp/AppIcon-resized.jpg
           sips -s format png /tmp/AppIcon-resized.jpg --out ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-
           sips -g pixelWidth -g pixelHeight -g hasAlpha ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 
           rm -rf .icon-update
