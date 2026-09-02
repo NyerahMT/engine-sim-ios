@@ -21,7 +21,7 @@
     <string>Engine Simulator may use Bluetooth to communicate with compatible external controllers and input devices.</string>
 
     <key>CFBundleDisplayName</key>
-    <string>Engine Simulator: iOS</string>
+    <string>Engine Sim</string>
 
     <key>CFBundleExecutable</key>
     <string>EngineSim</string>
@@ -33,7 +33,7 @@
     <string>6.0</string>
 
     <key>CFBundleName</key>
-    <string>Engine Simulator: iOS</string>
+    <string>Engine Sim</string>
 
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -56,7 +56,7 @@
 
         Files
           On My iPhone
-            Engine Simulator: iOS
+            Engine Sim
               Custom Engines
     -->
     <key>UIFileSharingEnabled</key>
