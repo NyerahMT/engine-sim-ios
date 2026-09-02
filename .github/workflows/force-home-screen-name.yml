@@ -19,62 +19,13 @@ jobs:
           fetch-depth: 0
 
       - name: Patch TestFlight display name
+        run: python3 scripts/patch-home-screen-name.py
+
+      - name: Commit patch and clean temporary files
         run: |
           set -euo pipefail
-
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path('.github/workflows/ios-core-manual.yml')
-          text = path.read_text()
-
-          needle = '''          /usr/libexec/PlistBuddy \\
-            -c "Set :CFBundleVersion $BUILD_NUMBER" \\
-            "$INFO_PLIST"
-
-          echo
-          echo "Bundle ID:"
-'''
-
-          replacement = '''          /usr/libexec/PlistBuddy \\
-            -c "Set :CFBundleVersion $BUILD_NUMBER" \\
-            "$INFO_PLIST"
-
-          /usr/libexec/PlistBuddy \\
-            -c "Set :CFBundleDisplayName Engine Simulator" \\
-            "$INFO_PLIST"
-
-          /usr/libexec/PlistBuddy \\
-            -c "Set :CFBundleName Engine Simulator" \\
-            "$INFO_PLIST"
-
-          echo
-          echo "Home Screen display name:"
-          /usr/libexec/PlistBuddy \\
-            -c "Print :CFBundleDisplayName" \\
-            "$INFO_PLIST"
-
-          echo
-          echo "Bundle name:"
-          /usr/libexec/PlistBuddy \\
-            -c "Print :CFBundleName" \\
-            "$INFO_PLIST"
-
-          echo
-          echo "Bundle ID:"
-'''
-
-          if needle not in text:
-              raise SystemExit('Expected signing identity block was not found')
-
-          if text.count(needle) != 1:
-              raise SystemExit(f'Expected one signing identity block, found {text.count(needle)}')
-
-          path.write_text(text.replace(needle, replacement, 1))
-          PY
-
+          rm scripts/patch-home-screen-name.py
           rm .github/workflows/force-home-screen-name.yml
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
